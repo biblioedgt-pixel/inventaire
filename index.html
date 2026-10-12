@@ -9,8 +9,8 @@
 <title>Inventaire bibliothèque</title>
 <script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script>
-  // ═══ À RENSEIGNER : l'URL du déploiement Google Apps Script (se termine par /exec) ═══
-  var URL_SERVICE = 'COLLER_ICI_L_URL_DU_SERVICE';
+  // Adresse du service Google Apps Script relié au tableau d'inventaire (version de production)
+  var URL_SERVICE = 'https://script.google.com/macros/s/AKfycbyETG6ePkBSH5PDNoIdcULRbqCxeF9TRXIX7r7WBd4zRALaGKmoe-V3bxVwOzC7_xvB/exec';
 </script>
 <style>
 :root{
@@ -129,8 +129,16 @@ input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:
   <!-- ACCUEIL -->
   <section class="screen on" id="accueil">
     <div id="blocConnexion" style="display:flex;flex-direction:column;gap:10px">
-      <div class="msg info" id="connexionMsg">Connexion au tableau d'inventaire…</div>
+      <div id="blocCode">
+        <label class="lbl" for="code">Code d'équipe</label>
+        <div class="row">
+          <input id="code" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go">
+          <button class="btn primary small none" id="btnValider">Valider</button>
+        </div>
+      </div>
+      <div class="msg info hidden" id="connexionMsg"></div>
       <button class="btn ghost hidden" id="btnReessayer">Réessayer</button>
+      <p style="font-size:13px;color:var(--muted);margin:0">Rien n'est conservé sur ce téléphone : le code est redemandé à chaque ouverture.</p>
     </div>
     <div id="blocSession" class="hidden" style="display:flex;flex-direction:column;gap:14px">
       <div>
@@ -271,7 +279,7 @@ var TITRES = { accueil: 'Inventaire', scan: 'Scanner', fiche: 'Vérifier et comp
 
 // ─────────── Appels au service Google ───────────
 function appel(action, donnees) {
-  var corps = { action: action };
+  var corps = { action: action, cle: S.cle };
   for (var k in donnees) corps[k] = donnees[k];
   return fetch(URL_SERVICE, {
     method: 'POST', body: JSON.stringify(corps), cache: 'no-store', credentials: 'omit', redirect: 'follow'
@@ -280,6 +288,7 @@ function appel(action, donnees) {
     return r.json();
   }).then(function (res) {
     if (res.suspendu) { suspendre(res.erreur); throw new Error(res.erreur); }
+    if (res.auth === false) { redemanderCode(res.erreur); throw new Error(res.erreur); }
     return res;
   });
 }
@@ -329,32 +338,65 @@ function couleurPile(num) {
   return 'hsl(' + ((n * 47) % 360) + ',55%,40%)';
 }
 
-// ─────────── Accueil ───────────
-// Connexion automatique au tableau dès l'ouverture de la page
-function connecter() {
-  $('btnReessayer').classList.add('hidden');
-  $('connexionMsg').className = 'msg info';
-  $('connexionMsg').textContent = "Connexion au tableau d'inventaire…";
+// ─────────── Accueil : code d'équipe puis connexion au tableau ───────────
+function message(txt, type) {
+  var m = $('connexionMsg');
+  m.className = 'msg ' + (type || 'info'); m.textContent = txt;
+  m.classList.toggle('hidden', !txt);
+}
+function initAccueil() {
   if (URL_SERVICE.indexOf('http') !== 0) {
-    $('connexionMsg').className = 'msg err';
-    $('connexionMsg').textContent = "L'adresse du service n'est pas encore renseignée dans index.html (voir le guide de mise en place).";
+    $('blocCode').classList.add('hidden');
+    message("L'adresse du service n'est pas encore renseignée dans index.html (voir le guide de mise en place).", 'err');
     return;
   }
+  if (!S.cle) { try { $('code').focus(); } catch (e) {} }
+}
+$('btnValider').addEventListener('click', function () {
+  var c = $('code').value.trim();
+  if (!c) { $('code').focus(); return; }
+  S.cle = c;
+  connecter();
+});
+$('code').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnValider').click(); });
+
+function connecter() {
+  if (URL_SERVICE.indexOf('http') !== 0) return initAccueil();
+  $('btnReessayer').classList.add('hidden');
+  $('btnValider').disabled = true;
+  message("Connexion au tableau d'inventaire…", 'info');
   appel('accueil', {}).then(function (d) {
+    $('btnValider').disabled = false;
     if (!d.ok) throw new Error(d.erreur || 'Réponse inattendue du service');
     S.pret = true;
+    $('code').value = '';
     afficherAccueil(d);
     $('blocConnexion').classList.add('hidden');
     $('blocSession').classList.remove('hidden');
     $('btnStart').classList.remove('hidden');
     traiterFile(); // reprend les envois restés en attente
   }).catch(function (e) {
-    $('connexionMsg').className = 'msg err';
-    $('connexionMsg').textContent = 'Connexion impossible : ' + e.message;
+    $('btnValider').disabled = false;
+    if (!S.cle) return; // code refusé : redemanderCode() a déjà affiché le message
+    message('Connexion impossible : ' + e.message, 'err');
     $('btnReessayer').classList.remove('hidden');
   });
 }
 $('btnReessayer').addEventListener('click', connecter);
+
+/** Code refusé par le service (erroné, ou changé par le responsable). */
+function redemanderCode(msg) {
+  S.cle = ''; S.pret = false;
+  arreterScan(); fermerCamera(); fermerCapture();
+  $('blocSession').classList.add('hidden');
+  $('btnStart').classList.add('hidden');
+  $('blocConnexion').classList.remove('hidden');
+  $('blocCode').classList.remove('hidden');
+  $('btnReessayer').classList.add('hidden');
+  message(msg || "Code d'équipe incorrect.", 'err');
+  if (S.ecran !== 'accueil') aller('accueil');
+  $('code').value = ''; try { $('code').focus(); } catch (e) {}
+}
 
 /** Le responsable a suspendu l'application depuis le tableau. */
 function suspendre(msg) {
@@ -363,8 +405,7 @@ function suspendre(msg) {
   $('blocSession').classList.add('hidden');
   $('btnStart').classList.add('hidden');
   $('blocConnexion').classList.remove('hidden');
-  $('connexionMsg').className = 'msg err';
-  $('connexionMsg').textContent = msg || 'Application suspendue.';
+  message(msg || 'Application suspendue.', 'err');
   $('btnReessayer').classList.remove('hidden');
   if (S.ecran !== 'accueil') aller('accueil');
 }
@@ -932,7 +973,7 @@ window.addEventListener('beforeunload', function (e) {
 });
 
 // Après le chargement complet de la page (la démo remplace d'abord l'appel au service)
-document.addEventListener('DOMContentLoaded', connecter);
+document.addEventListener('DOMContentLoaded', initAccueil);
 </script>
 </body>
 </html>
