@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="Cache-Control" content="no-store">
+<title>Démo inventaire bibliothèque</title>
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script>
+  // ═══ À RENSEIGNER : l'URL du déploiement Google Apps Script (se termine par /exec) ═══
+  var URL_SERVICE = 'https://demo.local'; // démonstration : aucun service Google
+</script>
+<style>
+:root{
+  --bg:#eef0ec; --surface:#ffffff; --ink:#1d2421; --muted:#5f6b66; --line:#d7dcd8;
+  --accent:#2f5d50; --accent-ink:#ffffff; --soft:#e3ece8; --warn:#9a6a12; --warn-soft:#f6ecd8;
+  --info:#2c4f7c; --info-soft:#e2eaf5; --ok:#2f6b3a; --ok-soft:#e1f0e3; --err:#a3322a; --err-soft:#f7e3e1;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#121614; --surface:#1c2220; --ink:#e7ece9; --muted:#9aa7a1; --line:#2f3834;
+    --accent:#6fb39e; --accent-ink:#0f1513; --soft:#24302c; --warn:#e2b45c; --warn-soft:#3a3122;
+    --info:#8fb4e6; --info-soft:#1f2b3b; --ok:#86c992; --ok-soft:#1f3123; --err:#ef8f86; --err-soft:#3b2220;
+  }
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--surface);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.app{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:5}
+.bar b{font-size:16px;white-space:nowrap}
+.bar .side{min-width:84px;display:flex}
+.bar .side.r{justify-content:flex-end}
+.back{border:none;background:none;color:var(--accent);font-size:15px;cursor:pointer;padding:0}
+.file{border:none;border-radius:99px;padding:5px 10px;font-size:13px;font-weight:700;cursor:pointer;background:var(--info-soft);color:var(--info)}
+.file.err{background:var(--err-soft);color:var(--err)}
+.file.ok{background:var(--ok-soft);color:var(--ok)}
+.screen{display:none;flex:1;flex-direction:column;padding:16px;gap:14px}
+.screen.on{display:flex}
+.lbl{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:4px}
+input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);font-size:16px}
+.masque{-webkit-text-security:disc;letter-spacing:.2em}
+.btn{border:none;border-radius:14px;padding:15px;font-size:16px;font-weight:600;cursor:pointer;width:100%;display:block;text-align:center}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.primary:disabled{opacity:.45}
+.btn.ghost{background:var(--soft);color:var(--ink)}
+.btn.small{padding:11px 12px;font-size:14px;width:auto}
+.row{display:flex;gap:8px}
+.row > *{flex:1}
+.row > .none{flex:none}
+.stat{background:var(--soft);border-radius:14px;padding:12px}
+.stat b{display:block;font-size:24px}
+.stat span{font-size:13px;color:var(--muted)}
+.cam{position:relative;border-radius:18px;overflow:hidden;background:#0d1110;aspect-ratio:4/3}
+.cam video{width:100%;height:100%;object-fit:cover;display:block}
+.cam .cadre{position:absolute;left:7%;right:7%;top:30%;bottom:30%;border:3px solid rgba(255,255,255,.85);border-radius:12px;pointer-events:none}
+.cam .cadre::after{content:"";position:absolute;left:4%;right:4%;top:50%;height:2px;background:#ff4d4d;box-shadow:0 0 8px #ff4d4d;animation:laser 1.6s ease-in-out infinite}
+@keyframes laser{0%,100%{top:15%}50%{top:85%}}
+.cam .hint{position:absolute;left:0;right:0;bottom:10px;text-align:center;color:#fff;font-size:13px;opacity:.9}
+.cam .torche{position:absolute;top:10px;right:10px;border:none;border-radius:99px;background:rgba(0,0,0,.5);color:#fff;padding:8px 12px;font-size:14px;cursor:pointer}
+.msg{font-size:14px;padding:10px 12px;border-radius:12px}
+.msg.warn{background:var(--warn-soft);color:var(--warn)}
+.msg.info{background:var(--info-soft);color:var(--info)}
+.msg.err{background:var(--err-soft);color:var(--err)}
+.badge{display:inline-block;padding:4px 11px;border-radius:99px;font-size:13px;font-weight:600}
+.badge.ok{background:var(--ok-soft);color:var(--ok)}
+.badge.info{background:var(--info-soft);color:var(--info)}
+.badge.warn{background:var(--warn-soft);color:var(--warn)}
+.notice h2{margin:0 0 4px;font-size:18px;line-height:1.25}
+.notice p{margin:0;font-size:14px;color:var(--muted)}
+.chargement h2,.chargement p{background:var(--soft);color:transparent !important;border-radius:6px;animation:pulse 1.1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.5}}
+.pile{display:flex;align-items:center;gap:12px;border-radius:16px;padding:12px;border:2px solid var(--pc,var(--line));background:var(--surface)}
+.pile .num{flex:none;width:58px;height:58px;border-radius:12px;background:var(--pc,var(--soft));color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800}
+.pile .nom{font-weight:700;font-size:16px;line-height:1.2}
+.pile .motif{font-size:12px;color:var(--muted);margin-top:2px}
+.pile button{margin-left:auto;flex:none}
+.grille{display:none;grid-template-columns:1fr 1fr;gap:6px}
+.grille.on{display:grid}
+.grille button{display:flex;align-items:center;gap:8px;text-align:left;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);padding:8px;font-size:13px;cursor:pointer;line-height:1.2}
+.grille button i{flex:none;font-style:normal;width:26px;height:26px;border-radius:7px;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:99px;padding:9px 16px;font-size:15px;cursor:pointer}
+.chip.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.photo-btn{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:14px;padding:8px 12px;background:var(--bg);cursor:pointer;color:var(--ink);font-size:15px;width:100%;text-align:left}
+.photo-btn .ic{width:44px;height:44px;border-radius:10px;background:var(--soft);display:flex;align-items:center;justify-content:center;flex:none;font-size:18px;overflow:hidden}
+.photo-btn .ic img{width:100%;height:100%;object-fit:cover}
+.photo-btn small{display:block;color:var(--muted);font-size:12px}
+.spacer{flex:1}
+.recent{font-size:14px;border-top:1px solid var(--line);padding-top:8px}
+.recent div{display:flex;justify-content:space-between;gap:10px;padding:4px 0;color:var(--muted)}
+.recent div span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.capture{position:fixed;inset:0;background:#000;z-index:40;display:none;flex-direction:column}
+.capture.on{display:flex}
+.capture video{flex:1;width:100%;object-fit:contain;min-height:0}
+.capture .cadre{position:absolute;left:8%;right:8%;top:38%;height:18%;border:3px solid rgba(255,255,255,.85);border-radius:12px;display:none}
+.capture.etiquette .cadre{display:block}
+.capture .top{position:absolute;top:0;left:0;right:0;padding:14px 16px;color:#fff;font-weight:600;text-align:center;background:linear-gradient(rgba(0,0,0,.6),transparent)}
+.capture .bas{display:flex;align-items:center;justify-content:space-around;padding:18px 16px 28px;background:#000}
+.capture .bas button{border:none;background:none;color:#fff;font-size:15px;cursor:pointer;min-width:80px}
+.declencheur{width:72px;height:72px;border-radius:50%;border:5px solid #fff !important;background:rgba(255,255,255,.25) !important}
+.capture.etiquette .declencheur{visibility:hidden}
+.panneau{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:30;display:none;align-items:flex-end;justify-content:center}
+.panneau.on{display:flex}
+.panneau .contenu{background:var(--surface);color:var(--ink);width:100%;max-width:520px;max-height:80vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px;display:flex;flex-direction:column;gap:12px}
+.panneau h3{margin:0;font-size:17px}
+.job{border:1px solid var(--line);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px;font-size:14px}
+.job .err{color:var(--err)}
+.alerte .contenu{border-top:6px solid var(--err)}
+.alerte h3{color:var(--err)}
+.alerte ul{margin:0;padding-left:18px;font-size:14px;display:flex;flex-direction:column;gap:4px}
+.alerte .titre-ouvrage{font-weight:700}
+.alerte .choix{display:flex;flex-direction:column;gap:8px}
+.toast{position:fixed;left:16px;right:16px;bottom:22px;max-width:488px;margin:0 auto;background:var(--ink);color:var(--surface);padding:13px 15px;border-radius:14px;font-size:15px;opacity:0;transform:translateY(10px);transition:.2s;pointer-events:none;z-index:50;display:flex;align-items:center;gap:12px}
+.toast.on{opacity:1;transform:none}
+.toast .num{flex:none;width:46px;height:46px;border-radius:10px;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800}
+.hidden{display:none !important}
+.bandeau-demo{background:var(--warn-soft);color:var(--warn);font-size:13px;padding:8px 16px;text-align:center;font-weight:600}
+.demo-tab{position:fixed;inset:0;z-index:35;background:var(--surface);display:none;flex-direction:column}
+.demo-tab.on{display:flex}
+.demo-tab .tete{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.demo-tab .tete b{font-size:16px}
+.demo-tab .actions{display:flex;gap:8px;flex-wrap:wrap}
+.demo-tab .defile{flex:1;overflow:auto;padding:0 0 16px}
+.demo-tab table{border-collapse:collapse;font-size:12px;min-width:1300px;width:100%;font-variant-numeric:tabular-nums}
+.demo-tab th,.demo-tab td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.demo-tab th{background:var(--soft);position:sticky;top:0;white-space:nowrap}
+.demo-tab td{max-width:220px}
+.vignette{width:44px;height:44px;object-fit:cover;border-radius:6px;margin-right:4px}
+</style>
+</head>
+<body>
+<div class="bandeau-demo">Version de démonstration : rien n'est envoyé au tableau Google. Tout s'efface à la fermeture de la page.</div>
+<div class="app">
+  <div class="bar">
+    <span class="side" id="barLeft"></span>
+    <b id="barTitle">Inventaire</b>
+    <span class="side r"><button class="file hidden" id="btnFile"></button></span>
+  </div>
+
+  <!-- ACCUEIL -->
+  <section class="screen on" id="accueil">
+    <div id="blocConnexion" style="display:flex;flex-direction:column;gap:10px">
+      <div class="msg info" id="connexionMsg">Connexion au tableau d'inventaire…</div>
+      <button class="btn ghost hidden" id="btnReessayer">Réessayer</button>
+    </div>
+    <div id="blocSession" class="hidden" style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <label class="lbl" for="emplacement">Emplacement en cours</label>
+        <select id="emplacement"></select>
+        <input id="emplacementAutre" class="hidden" placeholder="Saisir l'emplacement" autocomplete="off" style="margin-top:8px">
+      </div>
+      <div class="row">
+        <div class="stat"><b id="statMe">0</b><span>enregistrés pendant cette session</span></div>
+        <div class="stat"><b id="statAll">…</b><span>lignes dans le tableau</span></div>
+      </div>
+      <div class="stat"><b id="statCat">…</b><span>lignes « à cataloguer » en attente</span></div>
+      <button class="btn ghost" data-tableau>Tableau de test (0)</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn primary hidden" id="btnStart">Commencer le scan</button>
+  </section>
+
+  <!-- SCAN -->
+  <section class="screen" id="scan">
+    <div class="cam">
+      <video id="vScan" playsinline muted autoplay></video>
+      <div class="cadre"></div>
+      <div class="hint">Visez le code-barres ISBN ou EAN</div>
+      <button class="torche hidden" data-torche>💡 Lampe</button>
+    </div>
+    <div id="camMsg" class="msg err hidden"></div>
+    <div class="row">
+      <input id="saisieCode" inputmode="numeric" autocomplete="off" placeholder="Ou saisir l'ISBN / ISSN">
+      <button class="btn ghost small none" id="btnChercher">Chercher</button>
+    </div>
+    <button class="btn ghost small" id="btnSansCode" style="width:100%">Pas de code-barres</button>
+    <div class="recent" id="recent"><b>Derniers enregistrements</b></div>
+    <button class="btn ghost small" data-tableau style="width:100%">Tableau de test (0)</button>
+  </section>
+
+  <!-- FICHE -->
+  <section class="screen" id="fiche">
+    <div><span class="badge" id="fBadge"></span></div>
+    <div id="fDoublon" class="msg info hidden"></div>
+    <div id="fAvert" class="msg warn hidden"></div>
+
+    <div class="notice" id="fNotice">
+      <h2 id="fTitre"></h2>
+      <p id="fAuteurs"></p>
+      <p id="fEditeur"></p>
+      <p id="fCode"></p>
+    </div>
+
+    <div>
+      <span class="lbl">Pile proposée</span>
+      <div class="pile" id="fPile">
+        <div class="num" id="fPileNum">…</div>
+        <div><div class="nom" id="fPileNom">Classement en cours…</div><div class="motif" id="fPileMotif"></div></div>
+        <button class="btn ghost small" id="btnChangerPile">Changer</button>
+      </div>
+      <div class="grille" id="grillePiles" style="margin-top:8px"></div>
+    </div>
+
+    <div id="fRevue" class="row hidden">
+      <div><label class="lbl" for="fNumero">Numéro</label><input id="fNumero" inputmode="numeric" autocomplete="off"></div>
+      <div><label class="lbl" for="fAnnee">Année</label><input id="fAnnee" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+    </div>
+
+    <div id="fTitreSaisie" class="hidden">
+      <label class="lbl" for="fTitreLibre">Titre (facultatif)</label>
+      <input id="fTitreLibre" placeholder="Saisie rapide si lisible" autocomplete="off">
+    </div>
+
+    <div>
+      <label class="lbl" for="fInv">N° d'inventaire (facultatif, si étiquette collée)</label>
+      <div class="row">
+        <input id="fInv" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Laisser vide : n° provisoire automatique">
+        <button class="btn ghost small none" id="btnScanInv">Scanner</button>
+      </div>
+    </div>
+
+    <div>
+      <span class="lbl">État</span>
+      <div class="chips" id="fEtat"><span class="chip on">Bon</span><span class="chip">Usé</span><span class="chip">Abîmé</span></div>
+    </div>
+
+    <div id="fPhotos" style="display:flex;flex-direction:column;gap:8px"></div>
+
+    <div class="spacer"></div>
+    <button class="btn primary" id="btnSave">Enregistrer et scanner le suivant</button>
+  </section>
+</div>
+
+<!-- Prise de vue plein écran (photos et étiquette) -->
+<div class="capture" id="capture">
+  <video id="vCapture" playsinline muted autoplay></video>
+  <div class="cadre"></div>
+  <div class="top" id="captureTitre"></div>
+  <div class="bas">
+    <button id="btnAnnulerCapture">Annuler</button>
+    <button class="declencheur" id="btnDeclencher" aria-label="Prendre la photo"></button>
+    <button data-torche class="hidden">💡 Lampe</button>
+  </div>
+</div>
+
+<!-- Alerte : ouvrage déjà enregistré -->
+<div class="panneau alerte" id="alerteDoublon" role="alertdialog" aria-labelledby="alerteTitre">
+  <div class="contenu">
+    <h3 id="alerteTitre">Déjà enregistré</h3>
+    <div class="titre-ouvrage" id="alerteOuvrage"></div>
+    <div id="alerteTexte" style="font-size:14px"></div>
+    <ul id="alerteListe"></ul>
+    <div class="choix">
+      <button class="btn primary" id="btnMemeLivre">Même livre : ne pas enregistrer</button>
+      <button class="btn ghost" id="btnAutreExemplaire">Autre exemplaire : enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Envois en cours / refusés -->
+<div class="panneau" id="panneau">
+  <div class="contenu">
+    <h3>Envois</h3>
+    <div id="listeJobs"></div>
+    <button class="btn ghost" id="btnFermerPanneau">Fermer</button>
+  </div>
+</div>
+
+<div class="demo-tab" id="demoTableau">
+  <div class="tete">
+    <b>Tableau de test</b>
+    <div class="actions">
+      <button class="btn ghost small" id="btnCopierCsv">Copier</button>
+      <button class="btn ghost small" id="btnViderTableau">Vider</button>
+      <button class="btn primary small" id="btnFermerTableau">Fermer</button>
+    </div>
+  </div>
+  <div class="defile">
+    <table>
+      <thead><tr><th>N° provisoire</th><th>N° inventaire</th><th>Type</th><th>ISBN / ISSN</th><th>Titre</th><th>Auteurs</th><th>Éditeur</th><th>Collection</th><th>Année</th><th>Pages</th><th>N°</th><th>Ex.</th><th>Dewey</th><th>Pile</th><th>Source</th><th>État</th><th>Statut</th><th>Photos</th></tr></thead>
+      <tbody id="demoCorps"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span class="num hidden" id="toastNum"></span><span id="toastTxt"></span></div>
+
+<script>
+'use strict';
+// Toutes les données vivent en mémoire vive et disparaissent à la fermeture de la page :
+// aucun localStorage, sessionStorage, cookie, cache ni fichier n'est utilisé.
+
+var S = {
+  cle: '', piles: [], emplacements: [], compteur: 0, dernierInv: '', recent: [],
+  stream: null, torche: false, scanActif: false, occupe: false, dernierLu: '', nbLu: 0,
+  fiche: null, jeton: 0, file: [], envoiEnCours: false, envoyes: {},
+  capture: null
+};
+var $ = function (id) { return document.getElementById(id); };
+var TITRES = { accueil: 'Inventaire', scan: 'Scanner', fiche: 'Vérifier et compléter' };
+
+// ─────────── Appels au service Google ───────────
+function appel(action, donnees) {
+  var corps = { action: action };
+  for (var k in donnees) corps[k] = donnees[k];
+  return fetch(URL_SERVICE, {
+    method: 'POST', body: JSON.stringify(corps), cache: 'no-store', credentials: 'omit', redirect: 'follow'
+  }).then(function (r) {
+    if (!r.ok) throw new Error('Service injoignable (' + r.status + ')');
+    return r.json();
+  }).then(function (res) {
+    if (res.suspendu) { suspendre(res.erreur); throw new Error(res.erreur); }
+    return res;
+  });
+}
+
+// ─────────── Navigation et messages ───────────
+function aller(id) {
+  document.querySelectorAll('.screen').forEach(function (s) { s.classList.toggle('on', s.id === id); });
+  $('barTitle').textContent = TITRES[id];
+  var retour = id === 'scan' ? 'accueil' : (id === 'fiche' ? 'scan' : '');
+  $('barLeft').innerHTML = retour ? '<button class="back" data-retour="' + retour + '">‹ Retour</button>' : '';
+  if (id !== 'fiche') S.jeton++; // ignore une recherche arrivée après un retour
+  S.ecran = id;
+  if (id === 'scan') { $('vScan').play().catch(function () {}); demarrerScan(); }
+  else arreterScan();
+  if (id === 'accueil') { fermerCamera(); if (S.pret) chargerAccueil(); }
+  window.scrollTo(0, 0);
+}
+document.addEventListener('click', function (e) {
+  var b = e.target.closest('[data-retour]');
+  if (b) aller(b.dataset.retour);
+});
+
+function toast(txt, pile, duree) {
+  $('toastTxt').textContent = txt;
+  var n = $('toastNum');
+  if (pile && pile.num) { n.textContent = pile.num; n.style.background = couleurPile(pile.num); n.classList.remove('hidden'); }
+  else n.classList.add('hidden');
+  $('toast').classList.add('on');
+  clearTimeout(toast.h);
+  toast.h = setTimeout(function () { $('toast').classList.remove('on'); }, duree || 2600);
+}
+
+var audio = null;
+function bip() {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    var o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = 1400; g.gain.value = 0.08;
+    o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + 0.08);
+  } catch (e) {}
+  if (navigator.vibrate) navigator.vibrate(60);
+}
+
+function couleurPile(num) {
+  var n = parseInt(num, 10);
+  if (isNaN(n)) return '#6b7570';
+  return 'hsl(' + ((n * 47) % 360) + ',55%,40%)';
+}
+
+// ─────────── Accueil ───────────
+// Connexion automatique au tableau dès l'ouverture de la page
+function connecter() {
+  $('btnReessayer').classList.add('hidden');
+  $('connexionMsg').className = 'msg info';
+  $('connexionMsg').textContent = "Connexion au tableau d'inventaire…";
+  if (URL_SERVICE.indexOf('http') !== 0) {
+    $('connexionMsg').className = 'msg err';
+    $('connexionMsg').textContent = "L'adresse du service n'est pas encore renseignée dans index.html (voir le guide de mise en place).";
+    return;
+  }
+  appel('accueil', {}).then(function (d) {
+    if (!d.ok) throw new Error(d.erreur || 'Réponse inattendue du service');
+    S.pret = true;
+    afficherAccueil(d);
+    $('blocConnexion').classList.add('hidden');
+    $('blocSession').classList.remove('hidden');
+    $('btnStart').classList.remove('hidden');
+    traiterFile(); // reprend les envois restés en attente
+  }).catch(function (e) {
+    $('connexionMsg').className = 'msg err';
+    $('connexionMsg').textContent = 'Connexion impossible : ' + e.message;
+    $('btnReessayer').classList.remove('hidden');
+  });
+}
+$('btnReessayer').addEventListener('click', connecter);
+
+/** Le responsable a suspendu l'application depuis le tableau. */
+function suspendre(msg) {
+  S.pret = false;
+  arreterScan(); fermerCamera(); fermerCapture();
+  $('blocSession').classList.add('hidden');
+  $('btnStart').classList.add('hidden');
+  $('blocConnexion').classList.remove('hidden');
+  $('connexionMsg').className = 'msg err';
+  $('connexionMsg').textContent = msg || 'Application suspendue.';
+  $('btnReessayer').classList.remove('hidden');
+  if (S.ecran !== 'accueil') aller('accueil');
+}
+
+function chargerAccueil() {
+  appel('accueil', {}).then(afficherAccueil).catch(function (e) { toast(e.message); });
+}
+function afficherAccueil(d) {
+  S.piles = d.piles || []; S.emplacements = d.emplacements || [];
+  $('statMe').textContent = S.compteur;
+  $('statAll').textContent = Number(d.total).toLocaleString('fr-FR');
+  $('statCat').textContent = Number(d.aCataloguer).toLocaleString('fr-FR');
+  var sel = $('emplacement'), courant = sel.value;
+  sel.innerHTML = '';
+  S.emplacements.concat(['__autre']).forEach(function (v) {
+    var o = document.createElement('option');
+    o.value = v; o.textContent = v === '__autre' ? 'Autre…' : v;
+    sel.appendChild(o);
+  });
+  if (courant) sel.value = courant;
+  if (!sel.value) sel.selectedIndex = 0;
+  $('emplacementAutre').classList.toggle('hidden', sel.value !== '__autre');
+  construireGrillePiles();
+}
+function emplacement() {
+  return $('emplacement').value === '__autre' ? $('emplacementAutre').value.trim() : $('emplacement').value;
+}
+$('emplacement').addEventListener('change', function () {
+  $('emplacementAutre').classList.toggle('hidden', this.value !== '__autre');
+});
+$('btnStart').addEventListener('click', function () {
+  if (!emplacement()) { toast("Indiquez d'abord l'emplacement."); return; }
+  bip(); // active le son dès le premier geste (exigence des navigateurs)
+  ouvrirCamera().then(function () { aller('scan'); }).catch(function () { aller('scan'); });
+});
+
+// ─────────── Caméra (un seul flux pour toute la session) ───────────
+function ouvrirCamera() {
+  if (S.stream) return Promise.resolve();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    afficherErreurCamera("Ce navigateur ne donne pas accès à la caméra. Utilisez la saisie de l'ISBN.");
+    return Promise.reject();
+  }
+  return navigator.mediaDevices.getUserMedia({
+    audio: false,
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+  }).then(function (stream) {
+    S.stream = stream;
+    $('camMsg').classList.add('hidden');
+    $('vScan').srcObject = stream;
+    $('vCapture').srcObject = stream;
+    var piste = stream.getVideoTracks()[0];
+    var caps = piste.getCapabilities ? piste.getCapabilities() : {};
+    document.querySelectorAll('[data-torche]').forEach(function (b) { b.classList.toggle('hidden', !caps.torch); });
+    try { piste.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {}); } catch (e) {}
+    return $('vScan').play().catch(function () {});
+  }).catch(function (e) {
+    afficherErreurCamera("Caméra inaccessible (" + (e && e.name ? e.name : 'refus') + "). Autorisez la caméra pour ce site dans les réglages du navigateur, ou saisissez l'ISBN.");
+    throw e;
+  });
+}
+function fermerCamera() {
+  if (S.stream) S.stream.getTracks().forEach(function (t) { t.stop(); });
+  S.stream = null; S.torche = false;
+  $('vScan').srcObject = null; $('vCapture').srcObject = null;
+}
+function afficherErreurCamera(t) { $('camMsg').textContent = t; $('camMsg').classList.remove('hidden'); }
+
+document.querySelectorAll('[data-torche]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    if (!S.stream) return;
+    S.torche = !S.torche;
+    S.stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: S.torche }] }).catch(function () {});
+  });
+});
+
+// Libère la caméra quand l'application passe en arrière-plan, la reprend au retour
+document.addEventListener('visibilitychange', function () {
+  if (document.hidden) { arreterScan(); fermerCamera(); fermerCapture(); return; }
+  if (S.pret && (S.ecran === 'scan' || S.ecran === 'fiche')) {
+    ouvrirCamera().then(function () { if (S.ecran === 'scan') demarrerScan(); }).catch(function () {});
+  }
+});
+
+// ─────────── Lecture des codes-barres ───────────
+var LECTEUR = { natif: null, zxLivre: null, zxEtiquette: null };
+var FORMATS_LIVRE = ['ean_13', 'ean_8', 'upc_a'];
+// L'EAN-13 est exclu des étiquettes : on ne doit pas relire l'ISBN du livre par erreur.
+var FORMATS_ETIQUETTE = ['code_128', 'code_39', 'ean_8', 'qr_code'];
+var toile = document.createElement('canvas');
+var ctx = toile.getContext('2d', { willReadFrequently: true });
+
+(function initLecteurs() {
+  if ('BarcodeDetector' in window) {
+    BarcodeDetector.getSupportedFormats().then(function (f) {
+      var utiles = f.filter(function (x) { return FORMATS_ETIQUETTE.concat(FORMATS_LIVRE).indexOf(x) >= 0; });
+      if (utiles.indexOf('ean_13') >= 0) LECTEUR.natif = new BarcodeDetector({ formats: utiles });
+    }).catch(function () {});
+  }
+  if (window.ZXing) {
+    var cree = function (formats) {
+      var h = new Map();
+      h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+      h.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      var r = new ZXing.MultiFormatReader(); r.setHints(h); return r;
+    };
+    var B = ZXing.BarcodeFormat;
+    LECTEUR.zxLivre = cree([B.EAN_13, B.EAN_8, B.UPC_A]);
+    LECTEUR.zxEtiquette = cree([B.CODE_128, B.CODE_39, B.EAN_8, B.QR_CODE]);
+  }
+})();
+
+/** Lit un code dans l'image courante de la vidéo (bande centrale). */
+function lireImage(video, mode) {
+  var vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return Promise.resolve(null);
+  var largeur = Math.min(960, vw), echelle = largeur / vw;
+  var hBande = Math.round(vh * (mode === 'etiquette' ? 0.5 : 0.45));
+  var y0 = Math.round((vh - hBande) / 2);
+  toile.width = largeur; toile.height = Math.round(hBande * echelle);
+  ctx.drawImage(video, 0, y0, vw, hBande, 0, 0, toile.width, toile.height);
+
+  if (LECTEUR.natif) {
+    var formats = mode === 'etiquette' ? FORMATS_ETIQUETTE : FORMATS_LIVRE;
+    return LECTEUR.natif.detect(toile).then(function (codes) {
+      for (var i = 0; i < codes.length; i++) if (formats.indexOf(codes[i].format) >= 0) return codes[i].rawValue;
+      return null;
+    }).catch(function () { return lireZXing(mode); });
+  }
+  return Promise.resolve(lireZXing(mode));
+}
+function lireZXing(mode) {
+  var lecteur = mode === 'etiquette' ? LECTEUR.zxEtiquette : LECTEUR.zxLivre;
+  if (!lecteur) return null;
+  var w = toile.width, h = toile.height, px = ctx.getImageData(0, 0, w, h).data;
+  var lum = new Uint8ClampedArray(w * h);
+  for (var i = 0, j = 0; i < lum.length; i++, j += 4) lum[i] = (px[j] * 77 + px[j + 1] * 150 + px[j + 2] * 29) >> 8;
+  try {
+    var bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.RGBLuminanceSource(lum, w, h)));
+    var res = lecteur.decode(bmp), B = ZXing.BarcodeFormat, f = res.getBarcodeFormat();
+    var livre = [B.EAN_13, B.EAN_8, B.UPC_A].indexOf(f) >= 0;
+    // La bibliothèque ne respecte pas toujours le filtre de formats : on revérifie ici
+    if (mode === 'livre' ? !livre : f === B.EAN_13 || f === B.UPC_A) return null;
+    return res.getText();
+  } catch (e) { return null; } finally { lecteur.reset(); }
+}
+
+function ean13Valide(c) {
+  if (!/^\d{13}$/.test(c)) return false;
+  var s = 0;
+  for (var i = 0; i < 12; i++) s += Number(c[i]) * (i % 2 ? 3 : 1);
+  return (10 - (s % 10)) % 10 === Number(c[12]);
+}
+/** Écarte les lectures douteuses : clé de contrôle et double lecture identique. */
+function lectureSure(code, mode) {
+  if (mode === 'livre' && code.length === 13 && !ean13Valide(code)) return false;
+  if (code === S.dernierLu) S.nbLu++; else { S.dernierLu = code; S.nbLu = 1; }
+  return LECTEUR.natif ? true : S.nbLu >= 2;
+}
+
+function boucle(video, mode, surCode, actif) {
+  if (!actif()) return;
+  if (!S.occupe && video.readyState >= 2) {
+    S.occupe = true;
+    lireImage(video, mode).then(function (code) {
+      S.occupe = false;
+      if (code && actif() && lectureSure(code, mode)) { S.dernierLu = ''; S.nbLu = 0; surCode(code); }
+    }).catch(function () { S.occupe = false; });
+  }
+  setTimeout(function () { boucle(video, mode, surCode, actif); }, 90);
+}
+
+function demarrerScan() {
+  if (S.scanActif || !S.stream) return;
+  S.scanActif = true; S.dernierLu = ''; S.nbLu = 0;
+  boucle($('vScan'), 'livre', codeLu, function () { return S.scanActif && S.ecran === 'scan'; });
+}
+function arreterScan() { S.scanActif = false; }
+
+// ─────────── Recherche (sans bloquer l'écran) ───────────
+$('btnChercher').addEventListener('click', function () {
+  var v = $('saisieCode').value.trim();
+  if (v) { $('saisieCode').value = ''; codeLu(v, true); }
+});
+$('saisieCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('btnChercher').click(); });
+$('btnSansCode').addEventListener('click', function () {
+  ouvrirFiche({ code: '', type: 'Livre', found: false, sansCode: true });
+});
+
+function codeLu(code, manuel) {
+  arreterScan();
+  if (!manuel) bip();
+  var jeton = ++S.jeton;
+  ouvrirFiche({ code: code, chargement: true });
+  appel('rechercher', { code: code }).then(function (r) {
+    if (jeton !== S.jeton) return;
+    if (!r.ok) { toast(r.erreur || 'Code non reconnu'); aller('scan'); return; }
+    ouvrirFiche(r);
+  }).catch(function (e) {
+    if (jeton !== S.jeton) return;
+    // Hors connexion ou service lent : on continue sans notice, la ligne sera « à cataloguer »
+    ouvrirFiche({ code: code, isbnEan: /^\d{13}$/.test(code) ? code : '', type: 'Livre', found: false,
+      avertissement: 'Recherche impossible (' + e.message + '). Prenez les photos : la ligne sera à cataloguer.' });
+  });
+}
+
+// ─────────── Fiche ───────────
+function ouvrirFiche(r) {
+  var memePhotos = S.fiche && S.fiche.code === r.code && S.fiche.chargement ? S.fiche.photos : null;
+  var memeInv = memePhotos ? $('fInv').value : null;
+  var avant = memePhotos ? S.fiche : null;
+  S.fiche = r;
+  r.photos = memePhotos || {};
+  r.etat = avant ? avant.etat : 'Bon';
+  var revue = r.type === 'Revue';
+
+  var badge = $('fBadge');
+  if (r.chargement) { badge.className = 'badge info'; badge.textContent = 'Recherche dans les catalogues…'; }
+  else if (r.found) { badge.className = 'badge ok'; badge.textContent = (revue ? 'Revue · ' : 'Notice trouvée · ') + String(r.source || '').split(' · ')[0]; }
+  else if (revue) { badge.className = 'badge info'; badge.textContent = 'Revue détectée · notice non trouvée'; }
+  else { badge.className = 'badge warn'; badge.textContent = r.sansCode ? 'Sans code-barres' : 'Aucune notice trouvée'; }
+
+  $('fDoublon').classList.add('hidden'); $('fDoublon').textContent = '';
+  $('fAvert').classList.toggle('hidden', !r.avertissement);
+  $('fAvert').textContent = r.avertissement || '';
+
+  var n = $('fNotice');
+  n.classList.toggle('chargement', !!r.chargement);
+  n.classList.toggle('hidden', !r.chargement && !r.found && !revue);
+  $('fTitre').textContent = r.chargement ? 'Titre en cours de recherche' : (r.titre || (revue ? 'Titre de revue non trouvé' : ''));
+  $('fAuteurs').textContent = r.chargement ? 'Auteur' : (r.auteurs || '');
+  $('fEditeur').textContent = r.chargement ? 'Éditeur, année' : [r.editeur, r.collection ? 'coll. ' + r.collection : '', r.annee, r.pages ? r.pages + ' p.' : ''].filter(Boolean).join(', ');
+  $('fCode').textContent = r.chargement ? r.code : [r.isbnEan ? (revue ? 'EAN ' : 'ISBN ') + r.isbnEan : '', r.issn ? 'ISSN ' + r.issn : ''].filter(Boolean).join(' · ');
+
+  if (avant && avant.pileManuelle) { r.pileManuelle = true; afficherPile(avant.pileChoisie, 'Choisie manuellement'); }
+  else if (r.chargement) afficherPile({ num: '…', nom: 'Classement en cours…' }, '');
+  else if (r.pileNom) afficherPile({ num: r.pileNum, nom: r.pileNom }, r.pileMotif);
+  else afficherPile(pileSpeciale(revue ? 'revue' : 'trier'), r.sansCode ? 'Sans code-barres' : 'Aucun indice de classement');
+  $('grillePiles').classList.remove('on');
+
+  $('fRevue').classList.toggle('hidden', !revue);
+  if (!memePhotos) { $('fNumero').value = ''; $('fAnnee').value = ''; $('fTitreLibre').value = ''; }
+  $('fTitreSaisie').classList.toggle('hidden', !!(r.chargement || r.found));
+  $('fInv').value = memeInv !== null ? memeInv : proposerInventaire();
+  document.querySelectorAll('#fEtat .chip').forEach(function (c) { c.classList.toggle('on', c.textContent === r.etat); });
+
+  construirePhotos();
+  majBoutonSave();
+  if (S.ecran !== 'fiche') aller('fiche');
+  // Livre déjà enregistré : alerte bloquante dès la fin de la recherche (revues : contrôle au moment d'enregistrer, une fois le n° saisi)
+  if (!r.chargement && r.type !== 'Revue' && !r.autreExemplaire) {
+    var connus = dejaConnus(r);
+    if (connus.length) afficherAlerteDoublon(r, connus, null);
+  }
+}
+
+// ─────────── Doublons : ouvrage déjà enregistré ───────────
+/** Lignes déjà connues pour cet ouvrage : tableau (réponse du service) + envois en attente sur ce téléphone. */
+function dejaConnus(r, numero, annee) {
+  var revue = r.type === 'Revue', cle = revue ? r.issn : r.isbnEan;
+  if (!cle) return [];
+  var memeNumero = function (n, a) {
+    if (!revue) return true;
+    if (!numero || String(n || '').trim() !== numero) return false;
+    return !(annee && a && String(a).trim() !== annee);
+  };
+  var liste = (r.existants || []).filter(function (x) { return memeNumero(x.numero, x.annee); });
+  S.file.forEach(function (j) {
+    var f = j.fiche;
+    if ((revue ? f.issn : f.isbnEan) === cle && memeNumero(f.numero, f.annee)) {
+      liste.push({ provisoire: 'envoi en cours', pile: f.pile, emplacement: f.emplacement, date: 'depuis ce téléphone' });
+    }
+  });
+  return liste;
+}
+function afficherAlerteDoublon(r, liste, surAutre) {
+  $('alerteOuvrage').textContent = (r.titre || 'Ouvrage') + (r.type === 'Revue' && $('fNumero').value ? ' · n° ' + $('fNumero').value.trim() : '');
+  var revue = r.type === 'Revue';
+  $('alerteTexte').textContent = liste.length > 1 ? liste.length + ' exemplaires sont déjà enregistrés :'
+    : (revue ? 'Ce numéro est déjà enregistré :' : 'Cet ouvrage est déjà enregistré :');
+  clearTimeout(toast.h); $('toast').classList.remove('on'); // ne pas masquer les boutons de l'alerte
+  var ul = $('alerteListe'); ul.innerHTML = '';
+  liste.slice(0, 5).forEach(function (x) {
+    var li = document.createElement('li');
+    li.textContent = [x.inventaire || x.provisoire, x.pile ? 'pile ' + x.pile.split(' · ')[0] : '', x.emplacement, x.date].filter(Boolean).join(' · ');
+    ul.appendChild(li);
+  });
+  S.alerte = { liste: liste, surAutre: surAutre };
+  $('alerteDoublon').classList.add('on');
+  if (navigator.vibrate) navigator.vibrate([80, 60, 80]);
+}
+$('btnMemeLivre').addEventListener('click', function () {
+  var x = S.alerte && S.alerte.liste[0];
+  $('alerteDoublon').classList.remove('on'); S.alerte = null;
+  S.fiche = null;
+  toast('Non enregistré : déjà inventorié' + (x ? ' (' + (x.inventaire || x.provisoire) + (x.pile ? ' · pile ' + x.pile.split(' · ')[0] : '') + ')' : '') + '.', null, 4000);
+  aller('scan');
+});
+$('btnAutreExemplaire').addEventListener('click', function () {
+  var a = S.alerte;
+  $('alerteDoublon').classList.remove('on'); S.alerte = null;
+  if (S.fiche) {
+    S.fiche.autreExemplaire = true;
+    $('fDoublon').textContent = 'Autre exemplaire confirmé (exemplaire n° ' + (a.liste.length + 1) + ').';
+    $('fDoublon').classList.remove('hidden');
+  }
+  if (a && a.surAutre) a.surAutre();
+});
+
+function pileSpeciale(nature) {
+  var re = nature === 'revue' ? /^revue/i : /^(à|a) trier/i;
+  var p = S.piles.filter(function (x) { return re.test(x.nom); })[0];
+  return p || { num: '', nom: nature === 'revue' ? 'Revues' : 'À trier' };
+}
+function afficherPile(p, motif) {
+  S.fiche.pileChoisie = p.num === '…' ? null : p;
+  $('fPileNum').textContent = p.num || '?';
+  $('fPile').style.setProperty('--pc', p.num === '…' ? 'var(--line)' : couleurPile(p.num));
+  $('fPileNom').textContent = p.nom;
+  $('fPileMotif').textContent = motif || '';
+}
+function construireGrillePiles() {
+  var g = $('grillePiles'); g.innerHTML = '';
+  S.piles.forEach(function (p) {
+    var b = document.createElement('button');
+    var i = document.createElement('i'); i.textContent = p.num; i.style.background = couleurPile(p.num);
+    var t = document.createElement('span'); t.textContent = p.nom;
+    b.appendChild(i); b.appendChild(t);
+    b.addEventListener('click', function () { S.fiche.pileManuelle = true; afficherPile(p, 'Choisie manuellement'); g.classList.remove('on'); });
+    g.appendChild(b);
+  });
+}
+$('btnChangerPile').addEventListener('click', function () { $('grillePiles').classList.toggle('on'); });
+
+document.querySelectorAll('#fEtat .chip').forEach(function (c) {
+  c.addEventListener('click', function () {
+    document.querySelectorAll('#fEtat .chip').forEach(function (x) { x.classList.remove('on'); });
+    c.classList.add('on'); S.fiche.etat = c.textContent;
+  });
+});
+
+// Même règle que le serveur : majuscules, sans espaces (« eg 0012 » = « EG0012 »)
+function normaliserInv(s) { return String(s || '').trim().toUpperCase().replace(/\s+/g, ''); }
+
+function proposerInventaire() {
+  var m = S.dernierInv.match(/^(.*?)(\d+)$/);
+  if (!m) return '';
+  var n = String(Number(m[2]) + 1);
+  while (n.length < m[2].length) n = '0' + n;
+  return m[1] + n;
+}
+
+// ─────────── Photos : prises dans l'application, gardées en mémoire vive ───────────
+function construirePhotos() {
+  var r = S.fiche, revue = r.type === 'Revue';
+  var liste = r.chargement ? [['4e', '4e de couverture', 'Servira au résumé, généré plus tard']]
+    : r.found && !revue ? [['4e', '4e de couverture', 'Servira au résumé, généré plus tard']]
+    : revue ? [['sommaire', 'Sommaire (facultatif)', 'Utile pour le référencement des articles']]
+    : [['couverture', 'Couverture', ''], ['titre', 'Page de titre', 'Contient éditeur et date, essentiel'], ['4e', '4e de couverture', '']];
+  var zone = $('fPhotos'); zone.innerHTML = '';
+  liste.forEach(function (p) {
+    var b = document.createElement('button'); b.className = 'photo-btn';
+    var ic = document.createElement('span'); ic.className = 'ic';
+    if (r.photos[p[0]]) { var img = document.createElement('img'); img.src = 'data:image/jpeg;base64,' + r.photos[p[0]]; ic.appendChild(img); }
+    else ic.textContent = '📷';
+    var t = document.createElement('span'); t.textContent = p[1] + (r.photos[p[0]] ? ' ✓' : '');
+    if (p[2]) { var s = document.createElement('small'); s.textContent = p[2]; t.appendChild(s); }
+    b.appendChild(ic); b.appendChild(t);
+    b.addEventListener('click', function () { ouvrirCapture('photo', p[0], p[1]); });
+    zone.appendChild(b);
+  });
+}
+
+function ouvrirCapture(mode, nature, libelle) {
+  ouvrirCamera().then(function () {
+    S.capture = { mode: mode, nature: nature };
+    var c = $('capture');
+    c.classList.toggle('etiquette', mode === 'etiquette');
+    $('captureTitre').textContent = mode === 'etiquette' ? "Visez l'étiquette d'inventaire" : libelle;
+    c.classList.add('on');
+    $('vCapture').play().catch(function () {});
+    if (mode === 'etiquette') {
+      S.dernierLu = ''; S.nbLu = 0;
+      boucle($('vCapture'), 'etiquette', function (code) {
+        bip(); $('fInv').value = code.trim(); fermerCapture();
+      }, function () { return S.capture && S.capture.mode === 'etiquette'; });
+    }
+  }).catch(function () { toast('Caméra indisponible.'); });
+}
+function fermerCapture() { S.capture = null; $('capture').classList.remove('on'); }
+$('btnAnnulerCapture').addEventListener('click', fermerCapture);
+$('btnScanInv').addEventListener('click', function () { ouvrirCapture('etiquette'); });
+
+$('btnDeclencher').addEventListener('click', function () {
+  var v = $('vCapture');
+  if (!S.capture || !v.videoWidth) return;
+  var max = 1600, k = Math.min(1, max / Math.max(v.videoWidth, v.videoHeight));
+  var c = document.createElement('canvas');
+  c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  S.fiche.photos[S.capture.nature] = c.toDataURL('image/jpeg', 0.8).split(',')[1];
+  c.width = c.height = 0;
+  if (navigator.vibrate) navigator.vibrate(40);
+  fermerCapture();
+  construirePhotos();
+});
+
+function majBoutonSave() {
+  var b = $('btnSave'), r = S.fiche;
+  b.disabled = !!r.chargement;
+  b.textContent = r.chargement ? 'Recherche en cours…'
+    : (!r.found && r.type !== 'Revue' ? 'Enregistrer « à cataloguer »' : 'Enregistrer et scanner le suivant');
+}
+
+// ─────────── Enregistrement en arrière-plan ───────────
+$('btnSave').addEventListener('click', function () {
+  var r = S.fiche, revue = r.type === 'Revue';
+  var inv = normaliserInv($('fInv').value);
+  if (inv && S.envoyes[inv]) { toast('Le n° ' + inv + ' vient déjà d\'être utilisé.'); $('fInv').focus(); return; }
+  if (!emplacement()) { toast("Indiquez l'emplacement à l'accueil."); return; }
+  if (!r.autreExemplaire) {
+    var connus = dejaConnus(r, revue ? $('fNumero').value.trim() : '', revue ? $('fAnnee').value.trim() : '');
+    if (connus.length) { var bouton = this; afficherAlerteDoublon(r, connus, function () { bouton.click(); }); return; }
+  }
+
+  var pile = r.pileChoisie || pileSpeciale(revue ? 'revue' : 'trier');
+  var fiche = {
+    inventaire: inv, type: r.type || 'Livre', isbnEan: r.isbnEan || '', issn: r.issn || '',
+    titre: r.titre || $('fTitreLibre').value.trim(), auteurs: r.auteurs || '', editeur: r.editeur || '',
+    collection: r.collection || '', pages: r.pages || '',
+    annee: revue ? $('fAnnee').value.trim() : (r.annee || ''), numero: revue ? $('fNumero').value.trim() : '',
+    dewey: r.dewey || '', pile: (pile.num ? pile.num + ' · ' : '') + pile.nom,
+    sujets: r.sujets || '', source: r.source || '', found: !!r.found,
+    photos: Object.keys(r.photos).map(function (k) { return { nature: k, b64: r.photos[k] }; }),
+    emplacement: emplacement(), etat: r.etat, autreExemplaire: !!r.autreExemplaire
+  };
+  if (inv) { S.envoyes[inv] = true; S.dernierInv = inv; }
+  var job = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), fiche: fiche, essais: 0, etat: 'attente' };
+  S.file.push(job);
+  job.ligne = [fiche.titre || 'Ouvrage à cataloguer', inv || 'n° en cours…'];
+  S.recent.unshift(job.ligne);
+  majRecent();
+  S.fiche = null;
+  toast('Pile ' + (pile.num || '') + ' · ' + pile.nom + (inv ? ' (' + inv + ')' : ''), pile, 3200);
+  majFile();
+  traiterFile();
+  aller('scan');
+});
+
+function traiterFile() {
+  if (S.envoiEnCours || !S.pret) return;
+  var job = S.file.filter(function (j) { return j.etat === 'attente'; })[0];
+  if (!job) return;
+  S.envoiEnCours = true; job.etat = 'envoi'; majFile();
+  var suite = 0;
+  appel('enregistrer', { id: job.id, fiche: job.fiche }).then(function (res) {
+    if (res.ok) {
+      S.file.splice(S.file.indexOf(job), 1); // libère aussi les photos de la mémoire
+      if (job.ligne && !job.fiche.inventaire) { job.ligne[1] = res.provisoire; majRecent(); }
+      if (!job.fiche.inventaire && !job.fiche.isbnEan && !job.fiche.issn) {
+        toast(res.provisoire + ' : ouvrage sans code-barres, notez ce n° au crayon dans le livre.', null, 6000);
+      }
+      S.compteur++; $('statMe').textContent = S.compteur;
+    } else if (res.reessayer) {
+      job.etat = 'attente'; suite = 2000;
+    } else if (res.doublonIsbn) {
+      job.etat = 'echec'; job.doublonIsbn = true; job.existants = res.existants || []; job.erreur = res.erreur;
+      toast('À vérifier : ' + res.erreur, null, 4500);
+    } else {
+      job.etat = 'echec'; job.erreur = res.erreur; if (job.fiche.inventaire) delete S.envoyes[job.fiche.inventaire];
+      toast('Envoi refusé : ' + res.erreur, null, 4000);
+    }
+  }).catch(function (e) {
+    job.essais++;
+    if (job.essais < 5) { job.etat = 'attente'; suite = 1500 * Math.pow(2, job.essais); }
+    else { job.etat = 'echec'; job.erreur = 'Réseau indisponible (' + e.message + ')'; }
+  }).then(function () {
+    S.envoiEnCours = false; majFile();
+    setTimeout(traiterFile, suite);
+  });
+}
+
+function majFile() {
+  var b = $('btnFile');
+  var echecs = S.file.filter(function (j) { return j.etat === 'echec'; }).length;
+  var attente = S.file.length - echecs;
+  b.classList.toggle('hidden', !S.file.length);
+  b.classList.toggle('err', echecs > 0);
+  b.textContent = echecs ? '⚠ ' + echecs + ' à corriger' : '⇡ ' + attente + ' en envoi';
+  if (attente >= 25 && !majFile.alerte) { majFile.alerte = true; toast('Connexion lente : ' + attente + ' envois en attente. Gardez la page ouverte.', null, 4500); }
+  if (attente < 10) majFile.alerte = false;
+  if ($('panneau').classList.contains('on')) construirePanneau();
+}
+function majRecent() {
+  $('recent').innerHTML = '<b>Derniers enregistrements</b>';
+  S.recent.slice(0, 3).forEach(function (x) {
+    var d = document.createElement('div');
+    var a = document.createElement('span'); a.textContent = x[0];
+    var b = document.createElement('span'); b.textContent = x[1];
+    d.appendChild(a); d.appendChild(b); $('recent').appendChild(d);
+  });
+  if (S.recent.length > 3) S.recent.length = 3;
+}
+
+$('btnFile').addEventListener('click', function () { construirePanneau(); $('panneau').classList.add('on'); });
+$('btnFermerPanneau').addEventListener('click', function () { $('panneau').classList.remove('on'); });
+function construirePanneau() {
+  var l = $('listeJobs'); l.innerHTML = '';
+  if (!S.file.length) { l.textContent = 'Tous les enregistrements sont arrivés dans le tableau.'; return; }
+  S.file.forEach(function (j) {
+    var d = document.createElement('div'); d.className = 'job';
+    var t = document.createElement('div');
+    t.textContent = (j.fiche.inventaire || 'Sans n°') + ' · ' + (j.fiche.titre || 'Ouvrage à cataloguer');
+    d.appendChild(t);
+    if (j.etat !== 'echec') {
+      var s = document.createElement('div'); s.style.color = 'var(--muted)';
+      s.textContent = j.etat === 'envoi' ? 'Envoi en cours…' : 'En attente' + (j.essais ? ' (nouvel essai ' + j.essais + ')' : '');
+      d.appendChild(s);
+    } else {
+      var e = document.createElement('div'); e.className = 'err'; e.textContent = j.erreur; d.appendChild(e);
+      if (j.doublonIsbn) {
+        var choix = document.createElement('div'); choix.className = 'row';
+        var autre = document.createElement('button'); autre.className = 'btn primary small'; autre.textContent = 'Autre exemplaire : enregistrer';
+        var meme = document.createElement('button'); meme.className = 'btn ghost small'; meme.textContent = 'Même livre : supprimer';
+        autre.addEventListener('click', function () {
+          j.fiche.autreExemplaire = true; j.doublonIsbn = false; j.etat = 'attente'; j.essais = 0; j.erreur = '';
+          j.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+          majFile(); traiterFile();
+        });
+        meme.addEventListener('click', function () {
+          S.file.splice(S.file.indexOf(j), 1);
+          if (j.ligne) { j.ligne[1] = 'non enregistré (doublon)'; majRecent(); }
+          majFile();
+        });
+        choix.appendChild(autre); choix.appendChild(meme); d.appendChild(choix);
+        l.appendChild(d);
+        return;
+      }
+      var champ = document.createElement('input'); champ.value = j.fiche.inventaire; champ.setAttribute('autocomplete', 'off');
+      var row = document.createElement('div'); row.className = 'row';
+      var renvoyer = document.createElement('button'); renvoyer.className = 'btn primary small'; renvoyer.textContent = 'Renvoyer';
+      var abandon = document.createElement('button'); abandon.className = 'btn ghost small'; abandon.textContent = 'Abandonner';
+      renvoyer.addEventListener('click', function () {
+        var v = normaliserInv(champ.value);
+        if (v && S.envoyes[v]) { toast('Le n° ' + v + ' vient déjà d\'être utilisé.'); return; }
+        j.fiche.inventaire = v; j.etat = 'attente'; j.essais = 0; j.erreur = '';
+        j.id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        if (v) S.envoyes[v] = true;
+        if (j.ligne) { j.ligne[1] = v || 'n° en cours…'; majRecent(); }
+        majFile(); traiterFile();
+      });
+      abandon.addEventListener('click', function () {
+        if (confirm('Abandonner cet enregistrement ? Le livre devra être scanné à nouveau.')) { S.file.splice(S.file.indexOf(j), 1); majFile(); }
+      });
+      row.appendChild(renvoyer); row.appendChild(abandon);
+      d.appendChild(champ); d.appendChild(row);
+    }
+    l.appendChild(d);
+  });
+}
+
+// Prévient avant de fermer la page si des enregistrements ne sont pas encore partis
+window.addEventListener('beforeunload', function (e) {
+  if (S.file.length) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// Après le chargement complet de la page (la démo remplace d'abord l'appel au service)
+document.addEventListener('DOMContentLoaded', connecter);
+</script>
+<script>
+// ═══ MODE DÉMONSTRATION ═══
+// Remplace le service Google : recherche directe dans les catalogues depuis le téléphone,
+// piles calculées sur place, tableau de test en mémoire vive (effacé à la fermeture de la page).
+'use strict';
+var DEMO = { lignes: [], compteur: 0 };
+
+// Fonctions reprises à l'identique du script Google (Code.gs)
+var PILES_DEFAUT = [
+  ['Stratégie, doctrine et art de la guerre', '355; 355.02; 355.4',
+    'stratégi*; tactique*; doctrine*; art de la guerre; art militaire; art opératif; opérations militaires; guerre*; conflit armé*; dissuasion; contre-insurrection; guérilla*; strategy; warfare'],
+  ['Histoire militaire', '355.009; 355.09; 940.3-940.4; 940.53-940.54; 959.704; 965.04',
+    'histoire militaire; guerre mondiale; bataille*; campagnes; 1914-1918; 1939-1945; guerre d\'algérie; guerre d\'indochine; napoléon*; military history; world war'],
+  ['Armées, armes et équipements', '355.8; 356; 357; 358; 359; 623',
+    'armement*; armes; blindé*; chars de combat; aviation militaire; armée de l\'air; marine nationale; sous-marin*; drone*; missile*; artillerie; infanterie; cavalerie; forces spéciales; légion étrangère; navy; air force; weapons'],
+  ['Défense, sécurité et renseignement', '355.03; 327.12; 363.32; 005.8',
+    'défense nationale; politique de défense; politique militaire; sécurité nationale; sécurité internationale; renseignement*; espionnage; terrorisme; cyber*; otan; nato; livre blanc'],
+  ['Géopolitique et relations internationales', '327; 320.12; 341; 909.82-909.83',
+    'géopolitique; relations internationales; diplomatie; politique étrangère; politique mondiale; mondialisation; puissance*; geopolitics; international relations'],
+  ['Commandement, leadership et éthique', '355.33; 658.4; 172.42; 174',
+    'commandement; leadership; chef*; management; décision; éthique militaire; morale militaire; officier*'],
+  ['Politique, droit et institutions', '320-329; 340-354',
+    'politique; droit; droit international; constitution*; institutions; état; démocratie; élections; administration publique'],
+  ['Économie, société et environnement', '300-319; 330-339; 360-369; 551.6; 577',
+    'économie; économique*; société*; sociologie; démographie; énergie; climat; environnement; migrations'],
+  ['Philosophie, religions et pensée', '100-299',
+    'philosophie; philosophique*; éthique; religion*; islam*; christianisme; judaïsme; spiritualité'],
+  ['Sciences, techniques et numérique', '000-099; 500-699',
+    'informatique; numérique; intelligence artificielle; technologie*; espace; spatial*; sciences; physique; mathématique*; innovation'],
+  ['Histoire, géographie et biographies', '900-999',
+    'histoire; géographie; biographie*; mémoires; souvenirs; civilisation*'],
+  ['Littérature, arts et langues', '400-499; 700-899',
+    'roman*; poésie; littérature*; théâtre; arts; musique; cinéma; langue*'],
+  ['Usuels (dictionnaires, atlas)', '030-039; 403; 413; 423; 443; 912',
+    'dictionnaire*; encyclopédie*; atlas; annuaire*; répertoire*'],
+  ['Revues', '', '(revues : attribuée automatiquement)'],
+  ['À trier', '', '(ouvrages non classés : attribuée automatiquement)']
+];
+
+function lirePiles_(lignes) {
+  var piles = [];
+  lignes.forEach(function (l, i) {
+    var nom = String(l[1] || '').trim();
+    if (!nom) return;
+    var special = /^revue/i.test(normaliser_(nom)) ? 'revue' : (/^a trier/.test(normaliser_(nom)) ? 'defaut' : '');
+    piles.push({
+      num: String(l[0] || i + 1).trim(), nom: nom, special: special,
+      dewey: special ? [] : String(l[2] || '').split(/[;,]/).map(function (s) { return s.trim(); }).filter(String),
+      mots: special ? [] : String(l[3] || '').split(';').map(function (s) { return s.trim(); }).filter(String)
+    });
+  });
+  return piles;
+}
+
+function proposerPile_(n, piles) {
+  var spec = function (nature, defNom) {
+    var p = piles.filter(function (x) { return x.special === nature; })[0];
+    return p ? { num: p.num, nom: p.nom } : { num: '', nom: defNom };
+  };
+  var res = function (p, motif) { return { pileNum: p.num, pileNom: p.nom, pileMotif: motif }; };
+
+  if (n.type === 'Revue') return res(spec('revue', 'Revues'), 'Revue');
+
+  // 1. Indice Dewey : la règle la plus précise l'emporte
+  var d = String(n.dewey || '').replace(/[^\d.]/g, '');
+  if (/^\d{3}/.test(d)) {
+    var meilleur = null, score = 0;
+    piles.forEach(function (p) {
+      p.dewey.forEach(function (r) {
+        var s = scoreDewey_(d, r);
+        if (s > score) { score = s; meilleur = p; }
+      });
+    });
+    if (meilleur) return res(meilleur, 'Indice Dewey ' + n.dewey);
+  }
+
+  // 2. Mots-clés dans le titre et les sujets
+  var texte = ' ' + normaliser_((n.titre || '') + ' ' + (n.sujets || '')) + ' ';
+  var gagnant = null, best = 0, trouves = [];
+  piles.forEach(function (p) {
+    var s = 0, mots = [];
+    p.mots.forEach(function (m) {
+      var etoile = /\*$/.test(m);
+      var k = normaliser_(m.replace(/\*$/, ''));
+      if (!k) return;
+      var ok = etoile ? texte.indexOf(' ' + k) >= 0 : texte.indexOf(' ' + k + ' ') >= 0;
+      if (ok) { s += k.length; mots.push(m.replace(/\*$/, '')); }
+    });
+    if (s > best) { best = s; gagnant = p; trouves = mots; }
+  });
+  if (gagnant) return res(gagnant, 'Mots : ' + trouves.slice(0, 3).join(', '));
+
+  return res(spec('defaut', 'À trier'), 'Aucun indice de classement');
+}
+
+function scoreDewey_(d, regle) {
+  var chiffres = function (s) { return s.replace(/\D/g, '').length; };
+  var m = regle.match(/^([\d.]+)\s*-\s*([\d.]+)$/);
+  if (m) {
+    var a = m[1], b = m[2], v = parseFloat(d);
+    var dansPlage = v >= parseFloat(a) && (v <= parseFloat(b) || d.indexOf(b) === 0);
+    return dansPlage ? Math.min(chiffres(a), chiffres(b)) - 0.5 : 0;
+  }
+  return d.indexOf(regle) === 0 ? chiffres(regle) : 0;
+}
+
+function normaliser_(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function lireGoogleBooks_(texte) {
+  var data = JSON.parse(texte);
+  if (!data.items || !data.items.length) return null;
+  var vi = data.items[0].volumeInfo || {};
+  return {
+    titre: vi.title ? vi.title + (vi.subtitle ? ' : ' + vi.subtitle : '') : '',
+    auteurs: (vi.authors || []).join(' ; '),
+    editeur: vi.publisher || '',
+    annee: ((vi.publishedDate || '').match(/\d{4}/) || [''])[0],
+    pages: vi.pageCount ? String(vi.pageCount) : '',
+    sujets: (vi.categories || []).join(' ; '),
+    source: 'Google Books · ' + data.items[0].id
+  };
+}
+
+function lireOpenLibrary_(texte, isbn) {
+  var b = JSON.parse(texte)['ISBN:' + isbn];
+  if (!b) return null;
+  var nom = function (x) { return x.name; };
+  return {
+    titre: b.title ? b.title + (b.subtitle ? ' : ' + b.subtitle : '') : '',
+    auteurs: (b.authors || []).map(nom).join(' ; '),
+    editeur: (b.publishers || []).map(nom).join(' ; '),
+    annee: ((b.publish_date || '').match(/\d{4}/) || [''])[0],
+    pages: b.number_of_pages ? String(b.number_of_pages) : '',
+    sujets: (b.subjects || []).slice(0, 8).map(nom).join(' ; '),
+    dewey: ((b.classifications || {}).dewey_decimal_class || [])[0] || '',
+    source: 'Open Library' + (b.key ? ' · ' + b.key : '')
+  };
+}
+
+function pagesDepuisCollation_(c) {
+  var total = 0;
+  String(c || '').replace(/((?:\[?\d+\]?\s*,\s*)*\[?\d+\]?)\s*p\b/g, function (m, groupe) {
+    (groupe.match(/\d+/g) || []).forEach(function (n) { total += Number(n); });
+    return m;
+  });
+  return total ? String(total) : '';
+}
+
+function nettoyer_(s) { return String(s || '').toUpperCase().replace(/[^0-9X]/g, ''); }
+
+function cleEan13_(d12) {
+  var s = 0;
+  for (var i = 0; i < 12; i++) s += Number(d12[i]) * (i % 2 ? 3 : 1);
+  return String((10 - (s % 10)) % 10);
+}
+
+function ean13Valide_(c) { return /^\d{13}$/.test(c) && cleEan13_(c.substr(0, 12)) === c[12]; }
+
+function isbn10Valide_(c) {
+  if (!/^\d{9}[\dX]$/.test(c)) return false;
+  var s = 0;
+  for (var i = 0; i < 10; i++) s += (c[i] === 'X' ? 10 : Number(c[i])) * (10 - i);
+  return s % 11 === 0;
+}
+
+function isbn10vers13_(c) { var b = '978' + c.substr(0, 9); return b + cleEan13_(b); }
+
+function isbn13vers10_(c) {
+  var b = c.substr(3, 9), s = 0;
+  for (var i = 0; i < 9; i++) s += Number(b[i]) * (10 - i);
+  var k = (11 - (s % 11)) % 11;
+  return b + (k === 10 ? 'X' : String(k));
+}
+
+function cleIssn_(s7) {
+  var s = 0;
+  for (var i = 0; i < 7; i++) s += Number(s7[i]) * (8 - i);
+  var k = (11 - (s % 11)) % 11;
+  return k === 10 ? 'X' : String(k);
+}
+
+function issnDepuisEan977_(c) { var s7 = c.substr(3, 7); return s7.substr(0, 4) + '-' + s7.substr(4) + cleIssn_(s7); }
+
+function issnValide_(c) { return /^\d{7}[\dX]$/.test(c) && cleIssn_(c.substr(0, 7)) === c[7]; }
+
+var PILES_DEMO = lirePiles_(PILES_DEFAUT.map(function (r, i) { return [i + 1, r[0], r[1], r[2]]; }));
+
+function lireBnFNavigateur_(texte) {
+  var doc = new DOMParser().parseFromString(texte, 'text/xml');
+  var records = Array.prototype.filter.call(doc.getElementsByTagNameNS('*', 'record'), function (el) {
+    return el.getAttribute('type') || el.getAttribute('format');
+  });
+  var record = records[0];
+  if (!record) return null;
+  var champs = {};
+  Array.prototype.forEach.call(record.getElementsByTagNameNS('*', 'datafield'), function (df) {
+    var tag = df.getAttribute('tag'), sf = {};
+    Array.prototype.forEach.call(df.getElementsByTagNameNS('*', 'subfield'), function (s) {
+      var c = s.getAttribute('code'); (sf[c] = sf[c] || []).push(s.textContent.trim());
+    });
+    (champs[tag] = champs[tag] || []).push(sf);
+  });
+  var v = function (tag, code) { var f = champs[tag]; return f && f[0][code] ? f[0][code][0] : ''; };
+  var titre = v('200', 'a') + (v('200', 'e') ? ' : ' + v('200', 'e') : '');
+  if (!titre) return null;
+  var auteurs = [];
+  ['700', '701', '702'].forEach(function (t) { (champs[t] || []).forEach(function (sf) { if (sf.a) auteurs.push(sf.a[0] + (sf.b ? ', ' + sf.b[0] : '')); }); });
+  ['710', '711', '712'].forEach(function (t) { (champs[t] || []).forEach(function (sf) { if (sf.a) auteurs.push(sf.a[0]); }); });
+  if (!auteurs.length && v('200', 'f')) auteurs.push(v('200', 'f'));
+  var sujets = [];
+  ['600', '601', '602', '605', '606', '607'].forEach(function (t) {
+    (champs[t] || []).forEach(function (sf) {
+      if (!sf.a) return;
+      var s = sf.a[0];
+      ['x', 'y', 'z'].forEach(function (c) { (sf[c] || []).forEach(function (x) { s += ' -- ' + x; }); });
+      if (sujets.indexOf(s) < 0) sujets.push(s);
+    });
+  });
+  return {
+    titre: titre.replace(/[\u0088\u0089\u0098\u009C]/g, '').trim(), auteurs: auteurs.join(' ; '),
+    editeur: v('214', 'c') || v('210', 'c'),
+    collection: v('225', 'a') ? v('225', 'a') + (v('225', 'v') ? ' ; ' + v('225', 'v') : '') : '',
+    annee: ((v('214', 'd') || v('210', 'd')).match(/\d{4}/) || [''])[0],
+    pages: pagesDepuisCollation_(v('215', 'a')), dewey: v('676', 'a'),
+    sujets: sujets.slice(0, 8).join(' ; '), issn: v('011', 'a'), source: 'BnF'
+  };
+}
+
+/** Interroge une source et note si elle a répondu, n'a rien trouvé ou a été bloquée. */
+function interroger_(nom, url, lecteur, journal) {
+  var ctrl = window.AbortController ? new AbortController() : null;
+  var minuteur = setTimeout(function () { if (ctrl) ctrl.abort(); }, 8000);
+  return fetch(url, { cache: 'no-store', credentials: 'omit', signal: ctrl ? ctrl.signal : undefined })
+    .then(function (r) {
+      if (!r.ok) { journal[nom] = 'erreur ' + r.status; return null; }
+      return r.text().then(function (t) {
+        var n = null;
+        try { n = lecteur(t); } catch (e) { n = null; }
+        journal[nom] = n && n.titre ? 'trouvé' : 'rien trouvé';
+        return n && n.titre ? n : null;
+      });
+    })
+    .catch(function () { journal[nom] = 'injoignable depuis le téléphone'; return null; })
+    .then(function (n) { clearTimeout(minuteur); return n; });
+}
+
+function rechercherDemo_(codeBrut) {
+  var code = nettoyer_(codeBrut);
+  var r = { ok: true, code: code, type: 'Livre', isbnEan: '', issn: '', found: false, source: '', titre: '', auteurs: '',
+    editeur: '', collection: '', annee: '', pages: '', dewey: '', sujets: '', dejaPresent: 0, avertissement: '' };
+  if (/^\d{13}$/.test(code) && code.indexOf('977') === 0 && ean13Valide_(code)) { r.type = 'Revue'; r.isbnEan = code; r.issn = issnDepuisEan977_(code); }
+  else if (/^\d{4}-?\d{3}[\dX]$/i.test(String(codeBrut).trim()) && issnValide_(code)) { r.type = 'Revue'; r.issn = code.substr(0, 4) + '-' + code.substr(4); }
+  else if (/^\d{13}$/.test(code) && /^97[89]/.test(code) && ean13Valide_(code)) r.isbnEan = code;
+  else if (/^\d{9}[\dX]$/.test(code) && isbn10Valide_(code)) r.isbnEan = isbn10vers13_(code);
+  else if (/^\d{13}$/.test(code) && ean13Valide_(code)) { r.isbnEan = code; r.type = ''; r.avertissement = 'Code-barres commercial sans ISBN ni ISSN.'; }
+  else return Promise.resolve({ ok: false, erreur: 'Code non reconnu (' + (codeBrut || 'vide') + ').' });
+
+  var journal = {}, demandes = [];
+  var bnf = function (index, val) {
+    return 'https://catalogue.bnf.fr/api/SRU?version=1.2&operation=searchRetrieve&recordSchema=unimarcXchange&maximumRecords=1&query=' +
+      encodeURIComponent(index + ' all "' + val + '"');
+  };
+  if (r.type === 'Revue') demandes.push(interroger_('BnF', bnf('bib.issn', r.issn), lireBnFNavigateur_, journal));
+  else if (r.type) {
+    demandes.push(interroger_('BnF', bnf('bib.isbn', r.isbnEan), lireBnFNavigateur_, journal));
+    demandes.push(interroger_('Google Books', 'https://www.googleapis.com/books/v1/volumes?q=isbn:' + r.isbnEan, lireGoogleBooks_, journal));
+    demandes.push(interroger_('Open Library', 'https://openlibrary.org/api/books?bibkeys=ISBN:' + r.isbnEan + '&format=json&jscmd=data',
+      function (t) { return lireOpenLibrary_(t, r.isbnEan); }, journal));
+  }
+  var t0 = Date.now();
+  return Promise.all(demandes).then(function (notices) {
+    var n = notices.filter(Boolean)[0];
+    if (n) { Object.keys(n).forEach(function (k) { if (n[k]) r[k] = n[k]; }); r.found = true; }
+    // Complète avec les autres sources ce qui manque (pages, Dewey, collection)
+    notices.filter(Boolean).forEach(function (x) { ['pages', 'dewey', 'collection', 'sujets'].forEach(function (k) { if (!r[k] && x[k]) r[k] = x[k]; }); });
+    r.existants = existantsDemo_(r, false);
+    r.dejaPresent = r.existants.length;
+    var pile = proposerPile_(r, PILES_DEMO);
+    Object.keys(pile).forEach(function (k) { r[k] = pile[k]; });
+    var bilan = Object.keys(journal).map(function (k) { return k + ' : ' + journal[k]; }).join(' · ');
+    r.diagnostic = bilan + ' (' + ((Date.now() - t0) / 1000).toFixed(1) + ' s)';
+    r.avertissement = (r.avertissement ? r.avertissement + ' ' : '') + 'Test des sources : ' + r.diagnostic;
+    return r;
+  });
+}
+
+/** Même règle que le script Google : ISBN pour les livres ; ISSN + n° (+ année) pour les revues. */
+function existantsDemo_(f, exact) {
+  var revue = f.type === 'Revue', cle = revue ? f.issn : f.isbnEan;
+  if (!cle) return [];
+  if (revue && exact && !String(f.numero || '').trim()) return [];
+  return DEMO.lignes.filter(function (l) {
+    if ((revue ? l.issn : l.isbnEan) !== cle) return false;
+    if (!(revue && exact)) return true;
+    if (String(l.numero || '').trim() !== String(f.numero).trim()) return false;
+    return !(f.annee && l.annee && String(f.annee).trim() !== String(l.annee).trim());
+  }).slice().reverse().map(function (l) {
+    return { provisoire: l.provisoire, inventaire: l.inventaire, titre: l.titre, pile: l.pile, numero: l.numero, annee: l.annee,
+      emplacement: l.emplacement, date: l.date.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) };
+  });
+}
+
+function enregistrerDemo_(fiche) {
+  var inv = normaliserInv(fiche.inventaire);
+  var ex = existantsDemo_(fiche, true);
+  if (ex.length && !fiche.autreExemplaire) {
+    return { ok: false, doublonIsbn: true, existants: ex, erreur: 'Cet ouvrage est déjà enregistré (' + ex[0].provisoire + ').' };
+  }
+  if (inv && DEMO.lignes.some(function (l) { return l.inventaire === inv; })) {
+    return { ok: false, doublon: true, erreur: 'Le n° ' + inv + ' existe déjà dans le tableau de test.' };
+  }
+  DEMO.compteur++;
+  var prov = 'P-' + ('00000' + DEMO.compteur).slice(-6);
+  var l = {}; for (var k in fiche) l[k] = fiche[k];
+  l.inventaire = inv; l.provisoire = prov; l.date = new Date(); l.exemplaire = ex.length + 1;
+  l.statut = fiche.found ? 'Complet' : 'À cataloguer';
+  DEMO.lignes.push(l);
+  majBoutonTableau();
+  return { ok: true, inventaire: inv, provisoire: prov };
+}
+
+// Remplace l'appel au service Google
+appel = function (action, donnees) {
+  var attente = function (ms, v) { return new Promise(function (ok) { setTimeout(function () { ok(v); }, ms); }); };
+  if (action === 'accueil') {
+    return attente(150, { ok: true, total: DEMO.lignes.length,
+      aCataloguer: DEMO.lignes.filter(function (l) { return l.statut === 'À cataloguer'; }).length,
+      emplacements: ['Démo · Rayon 1', 'Démo · Rayon 2', 'Démo · Carton 1'],
+      piles: PILES_DEMO.map(function (p) { return { num: p.num, nom: p.nom }; }) });
+  }
+  if (action === 'rechercher') return rechercherDemo_(donnees.code);
+  if (action === 'enregistrer') return attente(400).then(function () { return enregistrerDemo_(donnees.fiche); });
+  return Promise.resolve({ ok: false, erreur: 'Action inconnue' });
+};
+
+// ─────────── Tableau de test ───────────
+function majBoutonTableau() {
+  document.querySelectorAll('[data-tableau]').forEach(function (b) { b.textContent = 'Tableau de test (' + DEMO.lignes.length + ')'; });
+}
+function afficherTableau() {
+  var corps = document.getElementById('demoCorps');
+  corps.innerHTML = '';
+  if (!DEMO.lignes.length) {
+    var tr0 = document.createElement('tr'); var td0 = document.createElement('td');
+    td0.colSpan = 18; td0.textContent = 'Aucun ouvrage enregistré pour l\'instant. Scannez un livre puis touchez « Enregistrer ».';
+    tr0.appendChild(td0); corps.appendChild(tr0);
+  }
+  DEMO.lignes.slice().reverse().forEach(function (l) {
+    var tr = document.createElement('tr');
+    [l.provisoire, l.inventaire, l.type, l.isbnEan || l.issn, l.titre, l.auteurs, l.editeur, l.collection,
+      l.annee || '', l.pages || '', l.numero || '', l.exemplaire, l.dewey, l.pile, (l.source || '').split(' · ')[0], l.etat, l.statut].forEach(function (v) {
+      var td = document.createElement('td'); td.textContent = v || ''; tr.appendChild(td);
+    });
+    var tdP = document.createElement('td');
+    (l.photos || []).forEach(function (p) {
+      var img = document.createElement('img'); img.src = 'data:image/jpeg;base64,' + p.b64; img.alt = p.nature; img.className = 'vignette';
+      tdP.appendChild(img);
+    });
+    tr.appendChild(tdP);
+    corps.appendChild(tr);
+  });
+  document.getElementById('demoTableau').classList.add('on');
+}
+function csvDemo() {
+  var entetes = ['N° provisoire', 'N° inventaire', 'Type', 'ISBN / ISSN', 'Titre', 'Auteurs', 'Éditeur', 'Collection', 'Année', 'Pages', 'N°', 'Exemplaire', 'Dewey', 'Pile', 'Source', 'État', 'Statut', 'Photos'];
+  var esc = function (v) { v = String(v == null ? '' : v); return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  return [entetes.join(';')].concat(DEMO.lignes.map(function (l) {
+    return [l.provisoire, l.inventaire, l.type, l.isbnEan || l.issn, l.titre, l.auteurs, l.editeur, l.collection, l.annee, l.pages,
+      l.numero, l.exemplaire, l.dewey, l.pile, (l.source || '').split(' · ')[0], l.etat, l.statut, (l.photos || []).length].map(esc).join(';');
+  })).join('\n');
+}
+document.querySelectorAll('[data-tableau]').forEach(function (b) { b.addEventListener('click', afficherTableau); });
+document.getElementById('btnFermerTableau').addEventListener('click', function () { document.getElementById('demoTableau').classList.remove('on'); });
+document.getElementById('btnCopierCsv').addEventListener('click', function () {
+  var txt = csvDemo();
+  var ok = function () { toast('Tableau copié : collez-le dans un tableur ou un message.'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, function () { toast('Copie refusée par le navigateur.'); });
+  else toast('Copie non disponible sur ce navigateur.');
+});
+document.getElementById('btnViderTableau').addEventListener('click', function () {
+  if (this.dataset.confirmer !== '1') { this.dataset.confirmer = '1'; this.textContent = 'Confirmer : tout effacer'; return; }
+  DEMO.lignes = []; DEMO.compteur = 0; this.dataset.confirmer = ''; this.textContent = 'Vider';
+  majBoutonTableau(); afficherTableau();
+});
+
+// La page se connecte seule au chargement (connecter()) : en démonstration, le service est simulé ci-dessus
+majBoutonTableau();
+
+</script>
+</body>
+</html>
