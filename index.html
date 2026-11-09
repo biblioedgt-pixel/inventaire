@@ -252,6 +252,19 @@ input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:
   </div>
 </div>
 
+<!-- Alerte : 4e de couverture non photographiée -->
+<div class="panneau alerte" id="alerte4e" role="alertdialog" aria-labelledby="alerte4eTitre">
+  <div class="contenu">
+    <h3 id="alerte4eTitre">4e de couverture non photographiée</h3>
+    <div class="titre-ouvrage" id="alerte4eOuvrage"></div>
+    <div style="font-size:14px">La photo de la 4e de couverture sert à rédiger le résumé. Sans elle, le résumé ne pourra pas être généré.</div>
+    <div class="choix">
+      <button class="btn primary" id="btnPhoto4e">📷 Photographier la 4e de couverture</button>
+      <button class="btn ghost" id="btnSans4e">Enregistrer sans la 4e</button>
+    </div>
+  </div>
+</div>
+
 <!-- Envois en cours / refusés -->
 <div class="panneau" id="panneau">
   <div class="contenu">
@@ -613,8 +626,12 @@ function codeLu(code, manuel) {
 }
 
 // ─────────── Fiche ───────────
+/** Code comparable à celui renvoyé par le service (chiffres et X seulement). */
+function codeNet(c) { return String(c || '').toUpperCase().replace(/[^0-9X]/g, ''); }
+
 function ouvrirFiche(r) {
-  var memePhotos = S.fiche && S.fiche.code === r.code && S.fiche.chargement ? S.fiche.photos : null;
+  S.apres4e = false;
+  var memePhotos = S.fiche && codeNet(S.fiche.code) === codeNet(r.code) && S.fiche.chargement ? S.fiche.photos : null;
   var memeInv = memePhotos ? $('fInv').value : null;
   var avant = memePhotos ? S.fiche : null;
   S.fiche = r;
@@ -703,6 +720,18 @@ $('btnMemeLivre').addEventListener('click', function () {
   S.fiche = null;
   toast('Non enregistré : déjà inventorié' + (x ? ' (' + (x.inventaire || x.provisoire) + (x.pile ? ' · pile ' + x.pile.split(' · ')[0] : '') + ')' : '') + '.', null, 4000);
   aller('scan');
+});
+$('btnPhoto4e').addEventListener('click', function () {
+  $('alerte4e').classList.remove('on');
+  if (!S.fiche) return;
+  S.apres4e = true; // la photo prise, l'enregistrement reprend tout seul
+  ouvrirCapture('photo', '4e', '4e de couverture');
+});
+$('btnSans4e').addEventListener('click', function () {
+  $('alerte4e').classList.remove('on');
+  if (!S.fiche) return;
+  S.fiche.sans4e = true;
+  $('btnSave').click();
 });
 $('btnAutreExemplaire').addEventListener('click', function () {
   var a = S.alerte;
@@ -796,7 +825,7 @@ function ouvrirCapture(mode, nature, libelle) {
   }).catch(function () { toast('Caméra indisponible.'); });
 }
 function fermerCapture() { S.capture = null; $('capture').classList.remove('on'); }
-$('btnAnnulerCapture').addEventListener('click', fermerCapture);
+$('btnAnnulerCapture').addEventListener('click', function () { S.apres4e = false; fermerCapture(); });
 $('btnScanInv').addEventListener('click', function () { ouvrirCapture('etiquette'); });
 
 $('btnDeclencher').addEventListener('click', function () {
@@ -806,11 +835,13 @@ $('btnDeclencher').addEventListener('click', function () {
   var c = document.createElement('canvas');
   c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
   c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-  S.fiche.photos[S.capture.nature] = c.toDataURL('image/jpeg', 0.8).split(',')[1];
+  var nature = S.capture.nature;
+  S.fiche.photos[nature] = c.toDataURL('image/jpeg', 0.8).split(',')[1];
   c.width = c.height = 0;
   if (navigator.vibrate) navigator.vibrate(40);
   fermerCapture();
   construirePhotos();
+  if (S.apres4e && nature === '4e') { S.apres4e = false; $('btnSave').click(); }
 });
 
 function majBoutonSave() {
@@ -829,6 +860,14 @@ $('btnSave').addEventListener('click', function () {
   if (!r.autreExemplaire) {
     var connus = dejaConnus(r, revue ? $('fNumero').value.trim() : '', revue ? $('fAnnee').value.trim() : '');
     if (connus.length) { var bouton = this; afficherAlerteDoublon(r, connus, function () { bouton.click(); }); return; }
+  }
+  // Livre sans photo de 4e de couverture : alerte (photo, ou enregistrement assumé sans elle)
+  if (!revue && !r.photos['4e'] && !r.sans4e) {
+    $('alerte4eOuvrage').textContent = r.titre || $('fTitreLibre').value.trim() || 'Ouvrage sans titre';
+    clearTimeout(toast.h); $('toast').classList.remove('on');
+    $('alerte4e').classList.add('on');
+    if (navigator.vibrate) navigator.vibrate([80, 60, 80]);
+    return;
   }
 
   var pile = r.pileChoisie || pileSpeciale(revue ? 'revue' : 'trier');
@@ -975,7 +1014,7 @@ window.addEventListener('beforeunload', function (e) {
 // Après le chargement complet de la page (la démo remplace d'abord l'appel au service)
 document.addEventListener('DOMContentLoaded', initAccueil);
 </script>
-     <!-- PATCH OCR : lecture ISBN / ISSN / couverture par photo (fichier ocr.js à côté de index.html) -->
-   <script src="ocr.js"></script>
+<!-- PATCH OCR : lecture ISBN / ISSN / couverture par photo (fichier ocr.js à côté de index.html) -->
+<script src="ocr.js"></script>
 </body>
 </html>
