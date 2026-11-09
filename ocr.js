@@ -1,5 +1,5 @@
 /*
- * PATCH OCR – Inventaire de la bibliothèque (fichier à AJOUTER sur GitHub, à côté de index.html)
+ * PATCH OCR (version 2) – Inventaire de la bibliothèque (fichier à AJOUTER sur GitHub, à côté de index.html)
  *
  * Ajoute, uniquement sur une fiche SANS notice (pas de code-barres, ou code non trouvé), deux boutons :
  *   « Photographier l'ISBN ou l'ISSN » et « Lire la couverture ».
@@ -38,6 +38,7 @@
     '<div id="ocrChamps" class="hidden">' +
     '  <div><label class="lbl" for="ocrTitre">Titre (lu sur la couverture)</label><input id="ocrTitre" autocomplete="off"></div>' +
     '  <div><label class="lbl" for="ocrAuteurs">Auteur(s)</label><input id="ocrAuteurs" autocomplete="off"></div>' +
+    '  <div><label class="lbl" for="ocrCollection">Collection</label><input id="ocrCollection" autocomplete="off"></div>' +
     '  <div class="row">' +
     '    <div><label class="lbl" for="ocrEditeur">Éditeur</label><input id="ocrEditeur" autocomplete="off"></div>' +
     '    <div class="none" style="width:96px"><label class="lbl" for="ocrAnnee">Année</label><input id="ocrAnnee" inputmode="numeric" maxlength="4" autocomplete="off"></div>' +
@@ -78,12 +79,13 @@
       $o('fTitreSaisie').classList.add('hidden'); // remplacé par les champs lus
       $o('ocrTitre').value = r.titre || ''; $o('ocrAuteurs').value = r.auteurs || '';
       $o('ocrEditeur').value = r.editeur || ''; $o('ocrAnnee').value = r.annee || '';
+      $o('ocrCollection').value = r.collection || '';
       var badge = $o('fBadge'); badge.className = 'badge info'; badge.textContent = 'Lu sur la couverture · à vérifier';
     }
   }
 
   // Les champs lus alimentent directement la fiche : « Enregistrer » les envoie comme une saisie manuelle
-  [['ocrTitre', 'titre'], ['ocrAuteurs', 'auteurs'], ['ocrEditeur', 'editeur'], ['ocrAnnee', 'annee']].forEach(function (x) {
+  [['ocrTitre', 'titre'], ['ocrAuteurs', 'auteurs'], ['ocrEditeur', 'editeur'], ['ocrCollection', 'collection'], ['ocrAnnee', 'annee']].forEach(function (x) {
     $o(x[0]).addEventListener('input', function () { if (S.fiche) S.fiche[x[1]] = this.value.trim(); });
   });
 
@@ -129,10 +131,19 @@
       fiche.chargement = true;
       ouvrirFiche(res);
       var o = res.ocr || {};
-      if (o.via === 'code') toast('Lu sur la photo : ' + (res.type === 'Revue' ? 'ISSN ' + res.issn : 'ISBN ' + res.isbnEan), null, 3500);
-      else if (o.via === 'catalogue') toast('Couverture reconnue : ' + (o.correspondance || res.titre), null, 3500);
+      // Revue : n° et année lus sur la photo → champs « Numéro » et « Année » (sans écraser une saisie)
+      if (res.type === 'Revue') {
+        if (o.numero && !$o('fNumero').value) $o('fNumero').value = o.numero;
+        if (o.annee && !$o('fAnnee').value) $o('fAnnee').value = o.annee;
+      }
+      var noms = { titre: 'titre', auteurs: 'auteur', editeur: 'éditeur', collection: 'collection', annee: 'année' };
+      var ajout = (o.completes || []).length && o.via !== 'texte'
+        ? ' · complété par la photo : ' + o.completes.map(function (k) { return noms[k] || k; }).join(', ') : '';
+      if (o.via === 'code') toast('Lu sur la photo : ' + (res.type === 'Revue' ? 'ISSN ' + res.issn + (o.numero ? ' · n° ' + o.numero : '') : 'ISBN ' + res.isbnEan) + ajout, null, 4000);
+      else if (o.via === 'catalogue') toast('Couverture reconnue : ' + (o.correspondance || res.titre) + ajout, null, 4000);
       else {
-        msgOcr('Aucune notice trouvée dans les catalogues : vérifiez les champs lus, puis enregistrez.', 'warn', o.texte);
+        msgOcr((o.code ? 'Code ' + o.code + ' lu, mais aucune notice dans les catalogues' : 'Aucune notice trouvée dans les catalogues')
+          + ' : vérifiez les champs lus, puis enregistrez.', 'warn', o.texte);
         if (res.existants && res.existants.length && typeof afficherAlerteDoublon === 'function') {
           afficherAlerteDoublon(S.fiche, res.existants, null);
         }
