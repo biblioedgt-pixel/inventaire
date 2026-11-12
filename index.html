@@ -116,6 +116,13 @@ input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:
 .toast.on{opacity:1;transform:none}
 .toast .num{flex:none;width:46px;height:46px;border-radius:10px;color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800}
 .hidden{display:none !important}
+/* Lecture par photo, correction de la notice, apprentissage */
+#ocrBloc{display:flex;flex-direction:column;gap:8px;border:1px dashed var(--line);border-radius:14px;padding:12px}
+#ocrBloc .btn{display:flex;align-items:center;justify-content:center;gap:8px}
+.ocr-texte{font-size:12px;color:var(--muted);font-style:italic;overflow-wrap:anywhere}
+.edition{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:14px;padding:12px}
+.edition .row > div{min-width:0}
+.aide{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -179,12 +186,38 @@ input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:
     <div id="fDoublon" class="msg info hidden"></div>
     <div id="fAvert" class="msg warn hidden"></div>
 
+    <!-- Pas de code-barres lisible : lecture par photo -->
+    <div id="ocrBloc" class="hidden">
+      <span class="lbl">Pas de code-barres lisible</span>
+      <button class="btn ghost" id="ocrBtnCode" type="button">📷 Photographier l'ISBN ou l'ISSN</button>
+      <button class="btn ghost" id="ocrBtnCouv" type="button">📷 Lire la couverture</button>
+      <div class="msg info hidden" id="ocrMsg"></div>
+      <div class="row hidden" id="ocrCodeBloc">
+        <input id="ocrCode" inputmode="numeric" autocomplete="off" aria-label="Numéro ISBN ou ISSN à corriger">
+        <button class="btn ghost small none" id="ocrBtnChercher" type="button">Chercher</button>
+      </div>
+    </div>
+
     <div class="notice" id="fNotice">
       <h2 id="fTitre"></h2>
       <p id="fAuteurs"></p>
       <p id="fEditeur"></p>
       <p id="fCode"></p>
     </div>
+    <div id="fHarmo" class="msg info hidden"></div>
+    <button class="btn ghost small hidden" id="btnCorriger" type="button">✏️ Corriger la notice</button>
+
+    <!-- Saisie / correction : chaque correction est apprise et reprise sur les ouvrages suivants -->
+    <div id="fEdition" class="edition hidden">
+      <div><label class="lbl" for="eTitre">Titre</label><input id="eTitre" autocomplete="off"></div>
+      <div><label class="lbl" for="eAuteurs">Auteur(s) <span class="aide">— Nom, Prénom ; séparés par « ; »</span></label><input id="eAuteurs" list="dlAuteurs" autocomplete="off"></div>
+      <div class="row">
+        <div><label class="lbl" for="eEditeur">Éditeur</label><input id="eEditeur" list="dlEditeurs" autocomplete="off"></div>
+        <div class="none" id="eAnneeBloc" style="width:96px"><label class="lbl" for="eAnnee">Année</label><input id="eAnnee" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+      </div>
+      <div><label class="lbl" for="eCollection">Collection</label><input id="eCollection" list="dlCollections" autocomplete="off"></div>
+    </div>
+    <datalist id="dlAuteurs"></datalist><datalist id="dlEditeurs"></datalist><datalist id="dlCollections"></datalist>
 
     <div>
       <span class="lbl">Pile proposée</span>
@@ -201,10 +234,7 @@ input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:
       <div><label class="lbl" for="fAnnee">Année</label><input id="fAnnee" inputmode="numeric" maxlength="4" autocomplete="off"></div>
     </div>
 
-    <div id="fTitreSaisie" class="hidden">
-      <label class="lbl" for="fTitreLibre">Titre (facultatif)</label>
-      <input id="fTitreLibre" placeholder="Saisie rapide si lisible" autocomplete="off">
-    </div>
+    <div id="fRevueAide" class="aide hidden"></div>
 
     <div>
       <label class="lbl" for="fInv">N° d'inventaire (facultatif, si étiquette collée)</label>
@@ -285,7 +315,8 @@ var S = {
   cle: '', piles: [], emplacements: [], compteur: 0, dernierInv: '', recent: [],
   stream: null, torche: false, scanActif: false, occupe: false, dernierLu: '', nbLu: 0,
   fiche: null, jeton: 0, file: [], envoiEnCours: false, envoyes: {},
-  capture: null
+  capture: null,
+  apprentissage: true, listes: null, revues: {}   // formes apprises, gardées en mémoire vive seulement
 };
 var $ = function (id) { return document.getElementById(id); };
 var TITRES = { accueil: 'Inventaire', scan: 'Scanner', fiche: 'Vérifier et compléter' };
@@ -388,6 +419,7 @@ function connecter() {
     $('blocSession').classList.remove('hidden');
     $('btnStart').classList.remove('hidden');
     traiterFile(); // reprend les envois restés en attente
+    chargerListes();
   }).catch(function (e) {
     $('btnValider').disabled = false;
     if (!S.cle) return; // code refusé : redemanderCode() a déjà affiché le message
@@ -649,13 +681,10 @@ function ouvrirFiche(r) {
   $('fAvert').classList.toggle('hidden', !r.avertissement);
   $('fAvert').textContent = r.avertissement || '';
 
-  var n = $('fNotice');
-  n.classList.toggle('chargement', !!r.chargement);
-  n.classList.toggle('hidden', !r.chargement && !r.found && !revue);
-  $('fTitre').textContent = r.chargement ? 'Titre en cours de recherche' : (r.titre || (revue ? 'Titre de revue non trouvé' : ''));
-  $('fAuteurs').textContent = r.chargement ? 'Auteur' : (r.auteurs || '');
-  $('fEditeur').textContent = r.chargement ? 'Éditeur, année' : [r.editeur, r.collection ? 'coll. ' + r.collection : '', r.annee, r.pages ? r.pages + ' p.' : ''].filter(Boolean).join(', ');
-  $('fCode').textContent = r.chargement ? r.code : [r.isbnEan ? (revue ? 'EAN ' : 'ISBN ') + r.isbnEan : '', r.issn ? 'ISSN ' + r.issn : ''].filter(Boolean).join(' · ');
+  if (!r.chargement) { r._lu = copieChamps(r); r._edite = {}; harmoniserLocal(r); r._propose = copieChamps(r); }
+  afficherNotice(r);
+  $('fHarmo').classList.add('hidden');
+  if (r._harmoLocal && r._harmoLocal.length) { $('fHarmo').textContent = 'Repris de l\'inventaire : ' + r._harmoLocal.join(' · '); $('fHarmo').classList.remove('hidden'); }
 
   if (avant && avant.pileManuelle) { r.pileManuelle = true; afficherPile(avant.pileChoisie, 'Choisie manuellement'); }
   else if (r.chargement) afficherPile({ num: '…', nom: 'Classement en cours…' }, '');
@@ -664,8 +693,13 @@ function ouvrirFiche(r) {
   $('grillePiles').classList.remove('on');
 
   $('fRevue').classList.toggle('hidden', !revue);
-  if (!memePhotos) { $('fNumero').value = ''; $('fAnnee').value = ''; $('fTitreLibre').value = ''; }
-  $('fTitreSaisie').classList.toggle('hidden', !!(r.chargement || r.found));
+  $('fRevueAide').classList.add('hidden');
+  if (!memePhotos) { $('fNumero').value = ''; $('fAnnee').value = ''; }
+  // Sans notice : champs ouverts à la saisie ; notice trouvée : bouton « Corriger »
+  remplirEdition(r);
+  $('fEdition').classList.toggle('hidden', !!(r.chargement || r.found));
+  $('btnCorriger').classList.toggle('hidden', !(!r.chargement && r.found));
+  majOcr(r);
   $('fInv').value = memeInv !== null ? memeInv : proposerInventaire();
   document.querySelectorAll('#fEtat .chip').forEach(function (c) { c.classList.toggle('on', c.textContent === r.etat); });
 
@@ -677,6 +711,7 @@ function ouvrirFiche(r) {
     var connus = dejaConnus(r);
     if (connus.length) afficherAlerteDoublon(r, connus, null);
   }
+  if (!r.chargement) { if (revue) proposerNumeroRevue(r); lancerApprentissage(r); }
 }
 
 // ─────────── Doublons : ouvrage déjà enregistré ───────────
@@ -763,7 +798,7 @@ function construireGrillePiles() {
     var i = document.createElement('i'); i.textContent = p.num; i.style.background = couleurPile(p.num);
     var t = document.createElement('span'); t.textContent = p.nom;
     b.appendChild(i); b.appendChild(t);
-    b.addEventListener('click', function () { S.fiche.pileManuelle = true; afficherPile(p, 'Choisie manuellement'); g.classList.remove('on'); });
+    b.addEventListener('click', function () { S.fiche.pileManuelle = true; afficherPile(p, 'Choisie manuellement'); g.classList.remove('on'); basculerRevue(p); });
     g.appendChild(b);
   });
 }
@@ -844,6 +879,349 @@ $('btnDeclencher').addEventListener('click', function () {
   if (S.apres4e && nature === '4e') { S.apres4e = false; $('btnSave').click(); }
 });
 
+// ─────────── Notice : affichage et correction ───────────
+var CHAMPS_FICHE = ['titre', 'auteurs', 'editeur', 'collection', 'annee'];
+var CHAMP_SAISIE = { titre: 'eTitre', auteurs: 'eAuteurs', editeur: 'eEditeur', collection: 'eCollection', annee: 'eAnnee' };
+var NOM_CHAMP = { titre: 'titre', auteurs: 'auteur', editeur: 'éditeur', collection: 'collection', annee: 'année' };
+
+function afficherNotice(r) {
+  var revue = r.type === 'Revue', n = $('fNotice');
+  n.classList.toggle('chargement', !!r.chargement);
+  n.classList.toggle('hidden', !r.chargement && !r.found && !revue);
+  $('fTitre').textContent = r.chargement ? 'Titre en cours de recherche' : (r.titre || (revue ? 'Titre de revue non trouvé' : ''));
+  $('fAuteurs').textContent = r.chargement ? 'Auteur' : (r.auteurs || '');
+  $('fEditeur').textContent = r.chargement ? 'Éditeur, année' : [r.editeur, r.collection ? 'coll. ' + r.collection : '', revue ? '' : r.annee, r.pages ? r.pages + ' p.' : ''].filter(Boolean).join(', ');
+  $('fCode').textContent = r.chargement ? r.code : [r.isbnEan ? (revue ? 'EAN ' : 'ISBN ') + r.isbnEan : '', r.issn ? 'ISSN ' + r.issn : ''].filter(Boolean).join(' · ');
+}
+function copieChamps(r) { var o = {}; CHAMPS_FICHE.forEach(function (k) { o[k] = String(r[k] || '').trim(); }); return o; }
+function remplirEdition(r) {
+  CHAMPS_FICHE.forEach(function (k) { var e = $(CHAMP_SAISIE[k]); if (document.activeElement !== e) e.value = r.chargement ? '' : (r[k] || ''); });
+  $('eAnneeBloc').classList.toggle('hidden', r.type === 'Revue'); // revue : année du numéro, plus bas
+}
+CHAMPS_FICHE.forEach(function (k) {
+  var e = $(CHAMP_SAISIE[k]);
+  e.addEventListener('input', function () {
+    var r = S.fiche; if (!r) return;
+    r[k] = this.value.trim(); r._edite = r._edite || {}; r._edite[k] = true;
+    afficherNotice(r);
+  });
+  // En quittant le champ : une forme déjà connue est reprise telle quelle (« economica » → « Economica »)
+  e.addEventListener('change', function () {
+    var r = S.fiche; if (!r || k === 'titre' || k === 'annee') return;
+    var f = formeConnue(k, this.value);
+    if (f && f !== this.value.trim()) { this.value = f; r[k] = f; afficherNotice(r); }
+  });
+});
+$('btnCorriger').addEventListener('click', function () {
+  if (!S.fiche) return;
+  remplirEdition(S.fiche);
+  $('fEdition').classList.remove('hidden'); $('btnCorriger').classList.add('hidden');
+  try { $('eAuteurs').focus(); } catch (e) {}
+});
+
+// ─────────── Apprentissage : formes déjà utilisées et corrections ───────────
+// Mêmes règles de comparaison que le tableau (Apprentissage.gs).
+function sansAccents(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[’`]/g, '\''); }
+function cleAuteur(s) {
+  return sansAccents(s).replace(/\([^)]*\)/g, ' ').replace(/[0-9]/g, ' ').replace(/[^a-z']+/g, ' ').trim().split(/\s+/).filter(Boolean).sort().join(' ');
+}
+function cleEditeur(s) {
+  return sansAccents(s).replace(/\b(les\s+)?(editions?|ed\.|eds?|edit\.|publishing|publishers?|verlag|sa|sas|sarl|cie|et cie)\b/g, ' ')
+    .replace(/\b(paris|lyon|bruxelles|geneve|montreal|london|new york)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function separerCollection(s) {
+  var t = String(s || '').trim().replace(/^(collection|coll\.)\s*[:«"“]?\s*/i, '').replace(/[»"”]\s*$/, '');
+  var m = t.match(/^(.*?)\s*[;,]\s*(?:n[°o]\s*)?(\d+[a-z]?)\s*$/i);
+  return m ? { base: m[1].trim(), num: m[2] } : { base: t, num: '' };
+}
+function cleCollection(s) { return sansAccents(separerCollection(s).base).replace(/[^a-z0-9]+/g, ' ').trim(); }
+function cleChamp(k, s) { return k === 'auteurs' ? cleAuteur(s) : k === 'editeur' ? cleEditeur(s) : k === 'collection' ? cleCollection(s) : sansAccents(s).replace(/[^a-z0-9]+/g, ' ').trim(); }
+function cleRevue(r) {
+  var issn = String(r.issn || '').toUpperCase().replace(/[^0-9X]/g, '');
+  return issn.length === 8 ? 'issn:' + issn : (r.titre ? 'titre:' + cleChamp('titre', r.titre) : '');
+}
+var LISTE_DE = { auteurs: 'auteurs', editeur: 'editeurs', collection: 'collections' };
+
+function chargerListes() {
+  appel('apprendre', { mode: 'listes' }).then(function (d) {
+    if (!d.ok) { if (/inconnu/i.test(d.erreur || '')) S.apprentissage = false; return; }
+    S.listes = { auteurs: {}, editeur: {}, collection: {}, corr: d.corrections || {} };
+    (d.auteurs || []).forEach(function (f) { S.listes.auteurs[cleAuteur(f)] = f; });
+    (d.editeurs || []).forEach(function (f) { S.listes.editeur[cleEditeur(f)] = f; });
+    (d.collections || []).forEach(function (f) { S.listes.collection[cleCollection(f)] = f; });
+    remplirListes();
+  }).catch(function () { /* sans listes : la saisie reste libre */ });
+}
+function remplirListes() {
+  [['auteurs', 'dlAuteurs'], ['editeur', 'dlEditeurs'], ['collection', 'dlCollections']].forEach(function (x) {
+    var dl = $(x[1]); dl.innerHTML = '';
+    Object.keys(S.listes[x[0]]).forEach(function (cle) { var o = document.createElement('option'); o.value = S.listes[x[0]][cle]; dl.appendChild(o); });
+  });
+}
+/** Forme déjà retenue pour une valeur (correction apprise, sinon forme de l'inventaire), ou null. */
+function formeConnue(k, v) {
+  v = String(v || '').trim();
+  if (!v || !S.listes) return null;
+  if (k === 'auteurs') {
+    var tout = (S.listes.corr.auteurs || {})[cleAuteur(v)];
+    if (tout) return tout;
+    var ch = false;
+    var res = v.split(/\s*;\s*/).filter(Boolean).map(function (a) {
+      var f = (S.listes.corr.auteurs || {})[cleAuteur(a)] || S.listes.auteurs[cleAuteur(a)];
+      if (f && f !== a) { ch = true; return f; }
+      return a;
+    }).join(' ; ');
+    return ch ? res : null;
+  }
+  var c = cleChamp(k, v);
+  var f2 = (S.listes.corr[k] || {})[c] || S.listes[k][c];
+  if (!f2) return null;
+  if (k === 'collection') { var num = separerCollection(v).num; f2 = separerCollection(f2).base + (num ? ' ; ' + num : ''); }
+  return f2;
+}
+/** Harmonisation immédiate (sans attendre le tableau) avec les formes connues. */
+function harmoniserLocal(r) {
+  r._harmoLocal = [];
+  ['auteurs', 'editeur', 'collection'].forEach(function (k) {
+    var f = formeConnue(k, r[k]);
+    if (f && f !== String(r[k] || '').trim()) { r[k] = f; r._harmoLocal.push(NOM_CHAMP[k] + ' « ' + f + ' »'); }
+  });
+}
+/** Harmonisation par le tableau : formes, corrections, compléments (collection, éditeur), pile, revue. */
+function lancerApprentissage(r) {
+  if (!S.apprentissage || r.chargement) return;
+  var f = { type: r.type || 'Livre', revue: r.type === 'Revue' || estPileRevue(r.pileChoisie), isbnEan: r.isbnEan || '', issn: r.issn || '',
+    titre: r.titre || '', auteurs: r.auteurs || '', editeur: r.editeur || '', collection: r.collection || '' };
+  appel('apprendre', { mode: 'harmoniser', fiche: f }).then(function (h) {
+    if (!h.ok) { if (/inconnu/i.test(h.erreur || '')) S.apprentissage = false; return; }
+    appliquerApprentissage(r, h);
+  }).catch(function () { /* fiche laissée telle quelle */ });
+}
+function appliquerApprentissage(r, h) {
+  if (S.fiche !== r) return; // l'opérateur est passé à l'ouvrage suivant
+  r._edite = r._edite || {};
+  var faits = (r._harmoLocal || []).slice();
+  (h.changements || []).forEach(function (c) {
+    if (r._edite[c.champ] || String(r[c.champ] || '').trim() !== c.avant) return;
+    r[c.champ] = c.apres; faits.push(NOM_CHAMP[c.champ] + ' « ' + c.apres + ' »');
+  });
+  (h.complements || []).forEach(function (c) {
+    if (r._edite[c.champ] || String(r[c.champ] || '').trim()) return;
+    r[c.champ] = c.apres; faits.push(NOM_CHAMP[c.champ] + ' « ' + c.apres + ' » (' + c.raison + ')');
+  });
+  if (h.pile && !r.pileManuelle && (h.pile.fort || estPileTrier(r.pileChoisie))) {
+    var p = pileConnue(h.pile);
+    if (p && (!r.pileChoisie || p.num !== r.pileChoisie.num)) { afficherPile(p, h.pile.motif); faits.push('pile ' + p.num + ' · ' + p.nom); }
+  }
+  if (h.revue) { r._revueSugg = h.revue; if (r.type === 'Revue') proposerNumeroRevue(r); }
+  r._propose = copieChamps(r);
+  afficherNotice(r); remplirEdition(r);
+  if (faits.length) { $('fHarmo').textContent = 'Repris de l\'inventaire : ' + faits.join(' · '); $('fHarmo').classList.remove('hidden'); }
+}
+function estPileRevue(p) { return !!(p && /^revue/i.test(p.nom || '')); }
+function estPileTrier(p) { return !p || /^(à|a) trier/i.test(p.nom || ''); }
+function pileConnue(p) {
+  return S.piles.filter(function (x) { return p.num && String(x.num) === String(p.num); })[0]
+    || S.piles.filter(function (x) { return sansAccents(x.nom) === sansAccents(p.nom); })[0] || null;
+}
+
+/** Au moment d'enregistrer : retient les corrections et les nouvelles formes (en mémoire vive et dans le tableau). */
+function apprendreDeLaFiche(r, fiche) {
+  if (fiche.type === 'Revue') {
+    var cle = cleRevue(fiche);
+    if (cle) S.revues[cle] = { numero: fiche.numero, annee: fiche.annee };
+  }
+  if (!S.listes) S.listes = { auteurs: {}, editeur: {}, collection: {}, corr: {} };
+  var corrections = [];
+  ['auteurs', 'editeur', 'collection', 'titre'].forEach(function (k) {
+    if (k === 'titre' && fiche.type !== 'Revue') return;
+    var lu = r._lu ? r._lu[k] : '', propose = r._propose ? r._propose[k] : lu, fin = String(r[k] || '').trim();
+    if (r._edite && r._edite[k] && lu && fin && fin !== propose) {
+      corrections.push({ champ: k, lu: lu, retenu: fin });
+      var c = S.listes.corr[k] || (S.listes.corr[k] = {});
+      c[cleChamp(k, lu)] = k === 'collection' ? separerCollection(fin).base : fin;
+    }
+  });
+  // Les formes enregistrées servent aussitôt aux ouvrages suivants de la séance
+  String(fiche.auteurs || '').split(/\s*;\s*/).filter(Boolean).forEach(function (a) { S.listes.auteurs[cleAuteur(a)] = a; });
+  if (fiche.editeur) S.listes.editeur[cleEditeur(fiche.editeur)] = fiche.editeur;
+  if (fiche.collection) S.listes.collection[cleCollection(fiche.collection)] = separerCollection(fiche.collection).base;
+  if (corrections.length && S.apprentissage) appel('apprendre', { mode: 'corriger', corrections: corrections }).catch(function () {});
+}
+
+// ─────────── Revues : n° et année proposés ───────────
+function proposerNumeroRevue(r) {
+  if (S.fiche !== r || r.type !== 'Revue') return;
+  var o = r.ocr || {}, prec = S.revues[cleRevue(r)], sug = r._revueSugg, aide = [];
+  var num = $('fNumero'), an = $('fAnnee');
+  if (!num.value) {
+    if (o.numero) { num.value = o.numero; aide.push('n° lu sur la photo'); }
+    else if (prec && /^\d+$/.test(prec.numero || '')) { num.value = String(Number(prec.numero) + 1); aide.push('n° suivant le ' + prec.numero + ' enregistré juste avant'); }
+    else if (sug && sug.numeroSuivant) { num.value = sug.numeroSuivant; aide.push('n° suivant le ' + sug.dernierNumero + ' déjà inventorié'); }
+  }
+  if (!an.value) {
+    var a = o.annee || (prec && prec.annee) || (sug && sug.annee) || String(r.annee || '').substr(0, 4);
+    if (a) { an.value = a; aide.push('année ' + (o.annee ? 'lue sur la photo' : prec && prec.annee ? 'du numéro précédent' : sug && sug.annee ? 'du dernier numéro' : 'de la notice')); }
+  }
+  if (aide.length) { $('fRevueAide').textContent = 'Proposé : ' + aide.join(', ') + '. Vérifiez avant d\'enregistrer.'; $('fRevueAide').classList.remove('hidden'); }
+}
+/** Pile « Revues » choisie à la main : la fiche passe en revue (n° et année proposés) ; autre pile : retour au livre. */
+function basculerRevue(p) {
+  var r = S.fiche; if (!r) return;
+  if (estPileRevue(p) && r.type !== 'Revue') {
+    r.type = 'Revue'; r.typeAuto = true;
+    $('fRevue').classList.remove('hidden');
+    remplirEdition(r); afficherNotice(r); construirePhotos(); majBoutonSave();
+    proposerNumeroRevue(r);
+    lancerApprentissage(r); // revue déjà inventoriée sous ce titre : n° suivant
+    toast('Revue : vérifiez le n° et l\'année.');
+  } else if (!estPileRevue(p) && r.typeAuto) {
+    r.type = 'Livre'; r.typeAuto = false;
+    $('fRevue').classList.add('hidden'); $('fRevueAide').classList.add('hidden');
+    remplirEdition(r); afficherNotice(r); construirePhotos(); majBoutonSave();
+  }
+}
+
+// ─────────── Lecture par photo (pas de code-barres lisible) ───────────
+var OCR = { attente: null, enCours: false };
+function msgOcr(txt, type, detail) {
+  var m = $('ocrMsg');
+  m.className = 'msg ' + (type || 'info') + (txt ? '' : ' hidden');
+  m.textContent = txt || '';
+  if (detail) { var d = document.createElement('div'); d.className = 'ocr-texte'; d.textContent = 'Texte lu : « ' + detail + ' »'; m.appendChild(d); }
+}
+function boutonsOcr(actifs) { $('ocrBtnCode').disabled = !actifs; $('ocrBtnCouv').disabled = !actifs; $('ocrBtnChercher').disabled = !actifs; }
+function majOcr(r) {
+  var parTexte = !!(r.ocr && r.ocr.via === 'texte');
+  $('ocrBloc').classList.toggle('hidden', !(!r.chargement && !r.found) && !parTexte);
+  if (!r.ocr && !OCR.enCours) { msgOcr(''); boutonsOcr(true); $('ocrCodeBloc').classList.add('hidden'); }
+  if (parTexte) { var b = $('fBadge'); b.className = 'badge info'; b.textContent = 'Lu sur la photo · à vérifier'; }
+}
+function demanderPhoto(mode) {
+  if (!S.fiche || OCR.enCours) return;
+  var nature = mode === 'code' ? 'isbn' : 'couverture';
+  if (mode === 'couverture' && S.fiche.photos.couverture) return lirePhoto(mode, S.fiche.photos.couverture);
+  OCR.attente = { nature: nature, mode: mode, avant: S.fiche.photos[nature] || null };
+  ouvrirCapture('photo', nature, mode === 'code' ? "Photographiez l'ISBN ou l'ISSN en gros plan (code-barres compris)" : 'Photographiez la couverture entière');
+}
+$('ocrBtnCode').addEventListener('click', function () { demanderPhoto('code'); });
+$('ocrBtnCouv').addEventListener('click', function () { demanderPhoto('couverture'); });
+// Après le déclencheur (qui range la photo dans la fiche) : lecture
+$('btnDeclencher').addEventListener('click', function () {
+  var a = OCR.attente;
+  if (!a || !S.fiche) return;
+  var photo = S.fiche.photos[a.nature];
+  if (!photo || photo === a.avant) return;
+  OCR.attente = null;
+  lirePhoto(a.mode, photo);
+});
+$('btnAnnulerCapture').addEventListener('click', function () { OCR.attente = null; });
+$('ocrBtnChercher').addEventListener('click', function () {
+  var c = $('ocrCode').value.toUpperCase().replace(/[^0-9X]/g, '');
+  if (c.length < 8) { toast('Numéro incomplet.'); return; }
+  chercherCodePhoto(c, 'Numéro corrigé');
+});
+$('ocrCode').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('ocrBtnChercher').click(); });
+
+/** 1. code-barres décodé sur la photo (dans le téléphone) ; 2. sinon lecture du texte par le service. */
+function lirePhoto(mode, photo) {
+  var fiche = S.fiche;
+  OCR.enCours = true; boutonsOcr(false); $('ocrCodeBloc').classList.add('hidden');
+  msgOcr(mode === 'code' ? 'Lecture du code-barres et du numéro sur la photo…' : 'Lecture de la couverture et recherche dans les catalogues…', 'info');
+  var etape = mode === 'code' ? lireCodePhoto(photo) : Promise.resolve(null);
+  etape.then(function (code) {
+    if (S.fiche !== fiche) { OCR.enCours = false; boutonsOcr(true); return; }
+    if (code) { OCR.enCours = false; return chercherCodePhoto(code, 'Code-barres lu sur la photo'); }
+    return lireTextePhoto(mode, photo, fiche);
+  });
+}
+function lireTextePhoto(mode, photo, fiche) {
+  return appel('ocr', { mode: mode, image: photo }).then(function (res) {
+    OCR.enCours = false; boutonsOcr(true);
+    if (S.fiche !== fiche) return;
+    if (!res.ok) {
+      var m = res.erreur || 'Lecture impossible.';
+      if (/Action inconnue/i.test(m)) m = "La lecture par photo n'est pas encore installée sur le tableau (OCR.gs).";
+      msgOcr(m, res.ocrVide ? 'warn' : 'err', res.texte);
+      if (res.codeLu) { $('ocrCode').value = res.codeLu; $('ocrCodeBloc').classList.remove('hidden'); }
+      return;
+    }
+    fiche.code = res.code; fiche.chargement = true;
+    ouvrirFiche(res); // garde photos, état et pile déjà choisis ; harmonise ; propose n° de revue
+    var o = res.ocr || {};
+    var ajout = (o.completes || []).length && o.via !== 'texte' ? ' · complété par la photo : ' + o.completes.map(function (k) { return NOM_CHAMP[k] || k; }).join(', ') : '';
+    if (o.via === 'code') toast('Lu sur la photo : ' + (res.type === 'Revue' ? 'ISSN ' + res.issn + (o.numero ? ' · n° ' + o.numero : '') : 'ISBN ' + res.isbnEan) + (o.corrige ? ' (chiffre mal lu corrigé)' : '') + ajout, null, 4000);
+    else if (o.via === 'catalogue') toast('Couverture reconnue : ' + (o.correspondance || res.titre) + ajout, null, 4000);
+    else {
+      msgOcr((o.code ? 'Code ' + o.code + ' lu, mais aucune notice dans les catalogues' : 'Aucune notice trouvée dans les catalogues') + ' : vérifiez les champs lus, puis enregistrez.', 'warn', o.texte);
+      if (res.existants && res.existants.length) afficherAlerteDoublon(S.fiche, res.existants, null);
+    }
+  }).catch(function (e) {
+    OCR.enCours = false; boutonsOcr(true);
+    if (S.fiche === fiche) msgOcr('Lecture impossible : ' + e.message, 'err');
+  });
+}
+/** Recherche habituelle d'un code lu sur la photo, en gardant les photos déjà prises. */
+function chercherCodePhoto(code, origine) {
+  var fiche = S.fiche; if (!fiche) return;
+  fiche.code = code; fiche.chargement = true; majBoutonSave(); boutonsOcr(false);
+  msgOcr(origine + ' : ' + code + '. Recherche dans les catalogues…', 'info');
+  return appel('rechercher', { code: code }).then(function (r) {
+    boutonsOcr(true);
+    if (S.fiche !== fiche) return;
+    if (!r.ok) { fiche.chargement = false; majBoutonSave(); msgOcr(r.erreur || 'Code non reconnu.', 'warn'); return; }
+    ouvrirFiche(r);
+    if (r.found) toast(origine + ' : ' + (r.type === 'Revue' ? 'ISSN ' + r.issn : 'ISBN ' + r.isbnEan), null, 3500);
+    else msgOcr(origine + ' : ' + code + ', mais aucune notice dans les catalogues. Complétez les champs, ou lisez la couverture.', 'warn');
+  }).catch(function (e) {
+    boutonsOcr(true);
+    if (S.fiche !== fiche) return;
+    fiche.chargement = false; majBoutonSave(); msgOcr('Recherche impossible : ' + e.message, 'err');
+  });
+}
+
+/** Code-barres EAN-13 sur une photo : lecteur natif, sinon ZXing à plusieurs tailles et orientations. */
+function lireCodePhoto(b64) {
+  return new Promise(function (fin) {
+    var img = new Image();
+    img.onerror = function () { fin(null); };
+    img.onload = function () {
+      var natif = LECTEUR.natif ? LECTEUR.natif.detect(img).then(function (codes) {
+        for (var i = 0; i < codes.length; i++) if (codeLivreValide(codes[i].rawValue)) return codes[i].rawValue;
+        return null;
+      }).catch(function () { return null; }) : Promise.resolve(null);
+      natif.then(function (c) { fin(c || zxingPhoto(img)); });
+    };
+    img.src = 'data:image/jpeg;base64,' + b64;
+  });
+}
+function codeLivreValide(c) { return /^97[789]\d{10}$/.test(String(c || '')) && ean13Valide(String(c)); }
+function zxingPhoto(img) {
+  if (!window.ZXing || !LECTEUR.zxLivre) return null;
+  var essais = [[1, 0], [0.6, 0], [1, 90], [0.4, 0], [0.6, 90], [1, 270]];
+  var c = document.createElement('canvas'), x = c.getContext('2d', { willReadFrequently: true });
+  try {
+    for (var i = 0; i < essais.length; i++) {
+      var k = Math.min(essais[i][0], 1600 / Math.max(img.width, img.height)), rot = essais[i][1];
+      var w = Math.round(img.width * k), h = Math.round(img.height * k);
+      c.width = rot % 180 ? h : w; c.height = rot % 180 ? w : h;
+      x.setTransform(1, 0, 0, 1, 0, 0); x.translate(c.width / 2, c.height / 2); x.rotate(rot * Math.PI / 180);
+      x.drawImage(img, -w / 2, -h / 2, w, h);
+      var px = x.getImageData(0, 0, c.width, c.height).data, lum = new Uint8ClampedArray(c.width * c.height);
+      for (var p = 0, q = 0; p < lum.length; p++, q += 4) lum[p] = (px[q] * 77 + px[q + 1] * 150 + px[q + 2] * 29) >> 8;
+      var src = new ZXing.RGBLuminanceSource(lum, c.width, c.height);
+      var bins = [new ZXing.HybridBinarizer(src), new ZXing.GlobalHistogramBinarizer(src)];
+      for (var b = 0; b < bins.length; b++) {
+        try {
+          var t = LECTEUR.zxLivre.decode(new ZXing.BinaryBitmap(bins[b])).getText();
+          if (codeLivreValide(t)) return t;
+        } catch (e) { /* pas de code à cette taille */ } finally { LECTEUR.zxLivre.reset(); }
+      }
+    }
+    return null;
+  } finally { c.width = c.height = 0; }
+}
+
 function majBoutonSave() {
   var b = $('btnSave'), r = S.fiche;
   b.disabled = !!r.chargement;
@@ -863,7 +1241,7 @@ $('btnSave').addEventListener('click', function () {
   }
   // Livre sans photo de 4e de couverture : alerte (photo, ou enregistrement assumé sans elle)
   if (!revue && !r.photos['4e'] && !r.sans4e) {
-    $('alerte4eOuvrage').textContent = r.titre || $('fTitreLibre').value.trim() || 'Ouvrage sans titre';
+    $('alerte4eOuvrage').textContent = r.titre || 'Ouvrage sans titre';
     clearTimeout(toast.h); $('toast').classList.remove('on');
     $('alerte4e').classList.add('on');
     if (navigator.vibrate) navigator.vibrate([80, 60, 80]);
@@ -873,7 +1251,7 @@ $('btnSave').addEventListener('click', function () {
   var pile = r.pileChoisie || pileSpeciale(revue ? 'revue' : 'trier');
   var fiche = {
     inventaire: inv, type: r.type || 'Livre', isbnEan: r.isbnEan || '', issn: r.issn || '',
-    titre: r.titre || $('fTitreLibre').value.trim(), auteurs: r.auteurs || '', editeur: r.editeur || '',
+    titre: r.titre || '', auteurs: r.auteurs || '', editeur: r.editeur || '',
     collection: r.collection || '', pages: r.pages || '',
     annee: revue ? $('fAnnee').value.trim() : (r.annee || ''), numero: revue ? $('fNumero').value.trim() : '',
     dewey: r.dewey || '', pile: (pile.num ? pile.num + ' · ' : '') + pile.nom,
@@ -882,6 +1260,7 @@ $('btnSave').addEventListener('click', function () {
     emplacement: emplacement(), etat: r.etat, autreExemplaire: !!r.autreExemplaire
   };
   if (inv) { S.envoyes[inv] = true; S.dernierInv = inv; }
+  apprendreDeLaFiche(r, fiche);
   var job = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), fiche: fiche, essais: 0, etat: 'attente' };
   S.file.push(job);
   job.ligne = [fiche.titre || 'Ouvrage à cataloguer', inv || 'n° en cours…'];
@@ -1014,7 +1393,5 @@ window.addEventListener('beforeunload', function (e) {
 // Après le chargement complet de la page (la démo remplace d'abord l'appel au service)
 document.addEventListener('DOMContentLoaded', initAccueil);
 </script>
-<!-- PATCH OCR : lecture ISBN / ISSN / couverture par photo (fichier ocr.js à côté de index.html) -->
-<script src="ocr.js"></script>
 </body>
 </html>
